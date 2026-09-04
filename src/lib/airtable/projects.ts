@@ -137,13 +137,15 @@ export async function getProjectStatusById(recordId: string): Promise<ProjectSta
  */
 export async function listUpcomingProjects(limit = 10): Promise<ProjectSearchResult[]> {
   if (isMockMode()) {
-    return listMockUpcoming().slice(0, limit);
+    return listMockUpcoming()
+      .filter((p) => p.daysToLaunch != null && p.daysToLaunch >= 0)
+      .slice(0, limit);
   }
 
   const records = await listRecords(EVENTOS_TABLE);
   return records
     .map(toSearchResult)
-    .filter((p) => p.daysToLaunch != null)
+    .filter((p) => p.daysToLaunch != null && p.daysToLaunch >= 0)
     .sort((a, b) => (a.daysToLaunch ?? 0) - (b.daysToLaunch ?? 0))
     .slice(0, limit);
 }
