@@ -14,6 +14,17 @@ import {
   listProjectsAtRisk,
 } from "../airtable/projects";
 import {
+  getFeedsCapacityByYear,
+  listFeedsActiveInMonth,
+  FeedsPeriodNotFoundError,
+} from "../airtable/feeds";
+import {
+  getStandalonesTotalsByYear,
+  getStandalonesTotalsByMonth,
+  listStandalonesActiveInMonth,
+  StandalonesPeriodNotFoundError,
+} from "../airtable/standalones";
+import {
   AmbiguousProjectError,
   ProjectNotFoundError,
   TERMINAL_TASK_STATUSES,
@@ -123,4 +134,56 @@ export async function listUpcomingProjectsTool(limit = 10) {
 export async function listProjectsAtRiskTool(limit = 10) {
   const projects = await listProjectsAtRisk(limit);
   return { ok: true, projects };
+}
+
+// --- Phase 3: Feeds Roll Out / Standalones ---
+// Same read-only contract as the rest of this file: every function returns
+// a plain JSON-serializable object, never throws for an expected "couldn't
+// parse the period" case (only for genuine bugs), and never invents a
+// number Airtable already computes (peak capacity, monthly event counts).
+
+export async function getFeedsCapacityTool(year: number) {
+  const capacity = await getFeedsCapacityByYear(year);
+  return { ok: true, capacity };
+}
+
+export async function listFeedsActiveInMonthTool(monthQuery: string) {
+  try {
+    const projects = await listFeedsActiveInMonth(monthQuery);
+    return { ok: true as const, projects };
+  } catch (err) {
+    if (err instanceof FeedsPeriodNotFoundError) {
+      return { ok: false as const, reason: "not_found" as const, message: err.message };
+    }
+    throw err;
+  }
+}
+
+export async function getStandalonesTotalsByYearTool(year: number) {
+  const totals = await getStandalonesTotalsByYear(year);
+  return { ok: true, totals };
+}
+
+export async function getStandalonesTotalsByMonthTool(monthQuery: string) {
+  try {
+    const totals = await getStandalonesTotalsByMonth(monthQuery);
+    return { ok: true as const, totals };
+  } catch (err) {
+    if (err instanceof StandalonesPeriodNotFoundError) {
+      return { ok: false as const, reason: "not_found" as const, message: err.message };
+    }
+    throw err;
+  }
+}
+
+export async function listStandalonesActiveInMonthTool(monthQuery: string) {
+  try {
+    const events = await listStandalonesActiveInMonth(monthQuery);
+    return { ok: true as const, events };
+  } catch (err) {
+    if (err instanceof StandalonesPeriodNotFoundError) {
+      return { ok: false as const, reason: "not_found" as const, message: err.message };
+    }
+    throw err;
+  }
 }

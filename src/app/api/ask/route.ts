@@ -9,9 +9,20 @@ import {
   searchProjectsTool,
   listUpcomingProjectsTool,
   listProjectsAtRiskTool,
+  getFeedsCapacityTool,
+  listFeedsActiveInMonthTool,
+  getStandalonesTotalsByYearTool,
+  listStandalonesActiveInMonthTool,
 } from "@/lib/ai/tools";
 import type { ProjectSearchResult, ProjectStatus } from "@/lib/project-status/types";
-import { tasksToListPayload, upcomingToListPayload, atRiskToListPayload } from "@/lib/ai/format";
+import {
+  tasksToListPayload,
+  upcomingToListPayload,
+  atRiskToListPayload,
+  feedsActiveToListPayload,
+  standalonesActiveToListPayload,
+} from "@/lib/ai/format";
+import { parsePeriod, monthLabel } from "@/lib/ops/period";
 
 // Rule-based question parser for /api/ask, used whenever GROQ_API_KEY isn't
 // configured or the Groq call throws (see src/lib/ai/groq.ts). Airtable is
@@ -27,6 +38,8 @@ const HELP_MESSAGE = `No entendí bien la pregunta. Puedo responder cosas como:
 - "¿Cuáles son los próximos deadlines de <proyecto>?"
 - "¿Qué proyectos están en riesgo?"
 - "¿Qué eventos vienen?"
+- "¿Cuál es el pico de feeds en <año>?" / "¿Qué feeds están activos en <mes>?"
+- "¿Cuántos standalones hay en <año>?" / "¿Qué standalones están activos en <mes>?"
 El nombre del proyecto puede ser parcial (ej. "Telefe" en vez del nombre completo).`;
 
 type Intent =
@@ -37,6 +50,8 @@ type Intent =
   | "blocked"
   | "pending"
   | "status"
+  | "feeds"
+  | "standalones"
   | "unknown";
 
 interface IntentDef {
@@ -48,6 +63,14 @@ interface IntentDef {
 // task-list intents come first, "status" is the broadest catch-all so it's
 // checked last (otherwise it would swallow phrasings meant for the others).
 const INTENT_PATTERNS: IntentDef[] = [
+  {
+    intent: "feeds",
+    patterns: [/\bfeeds?\b/],
+  },
+  {
+    intent: "standalones",
+    patterns: [/\bstandalones?\b/],
+  },
   {
     intent: "at_risk",
     patterns: [/proyectos?\s+(est[aá]n\s+)?en\s+riesgo/, /qu[eé]\s+est[aá]\s+en\s+riesgo/],
@@ -178,6 +201,62 @@ async function resolveProject(
 
 async function handleRuleBased(text: string): Promise<NextResponse> {
   const { intent, projectQuery } = matchIntent(text);
+
+  if (intent === "feeds") {
+    const { year, monthIndex } = parsePeriod(text);
+    if (monthIndex !== null && year !== null) {
+      const result = await listFeedsActiveInMonthTool(text);
+      if (!result.ok) return NextResponse.json({ reply: result.message });
+      if (result.projects.length === 0) {
+        return NextResponse.json({ reply: `No hay feeds activos en ${monthLabel(year, monthIndex)}.` });
+      }
+      return NextResponse.json({
+        reply: `Feeds activos en ${monthLabel(year, monthIndex)}:`,
+        list: feedsActiveToListPayload(result.projects, `Feeds activos en ${monthLabel(year, monthIndex)}`),
+      });
+    }
+    if (year !== null) {
+      const result = await getFeedsCapacityTool(year);
+      const { peakFeeds, peakMonth } = result.capacity;
+      return NextResponse.json({
+        reply: peakMonth
+          ? `El pico de feeds simultáneos en ${year} es ${peakFeeds} (en ${peakMonth}).`
+          : `No encontré datos de feeds para ${year}.`,
+      });
+    }
+    return NextResponse.json({
+      reply:
+        '¿De qué año o mes querés saber la capacidad de feeds? Ejemplo: "pico de feeds en 2026" o "feeds activos en octubre 2026".',
+    });
+  }
+
+  if (intent === "standalones") {
+    const { year, monthIndex } = parsePeriod(text);
+    if (monthIndex !== null && year !== null) {
+      const result = await listStandalonesActiveInMonthTool(text);
+      if (!result.ok) return NextResponse.json({ reply: result.message });
+      if (result.events.length === 0) {
+        return NextResponse.json({ reply: `No hay standalones activos en ${monthLabel(year, monthIndex)}.` });
+      }
+      return NextResponse.json({
+        reply: `Standalones activos en ${monthLabel(year, monthIndex)}:`,
+        list: standalonesActiveToListPayload(
+          result.events,
+          `Standalones activos en ${monthLabel(year, monthIndex)}`
+        ),
+      });
+    }
+    if (year !== null) {
+      const result = await getStandalonesTotalsByYearTool(year);
+      return NextResponse.json({
+        reply: `En ${year} hay ${result.totals.totalEvents} eventos standalone en total, de ${result.totals.distinctShows} shows/proyectos distintos.`,
+      });
+    }
+    return NextResponse.json({
+      reply:
+        '¿De qué año o mes querés saber los standalones? Ejemplo: "standalones en 2026" o "standalones activos en junio 2026".',
+    });
+  }
 
   if (intent === "at_risk") {
     const { projects } = await listProjectsAtRiskTool();
