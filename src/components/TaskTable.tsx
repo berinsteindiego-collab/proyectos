@@ -31,8 +31,6 @@ export default function TaskTable({ tasks }: { tasks: ProjectTask[] }) {
             <th className="px-4 py-3">Tarea</th>
             <th className="px-4 py-3">Estado</th>
             <th className="px-4 py-3">Deadline</th>
-            <th className="px-4 py-3">Prioridad</th>
-            <th className="px-4 py-3">Riesgo</th>
             <th className="px-4 py-3">Responsable</th>
           </tr>
         </thead>
@@ -49,14 +47,12 @@ export default function TaskTable({ tasks }: { tasks: ProjectTask[] }) {
               </td>
               <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{task.status}</td>
               <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{task.deadline ?? "—"}</td>
-              <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{task.priority ?? "—"}</td>
-              <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{task.risk ?? "—"}</td>
               <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{formatOwner(task)}</td>
             </tr>
           ))}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">
+              <td colSpan={4} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">
                 Sin tareas.
               </td>
             </tr>
