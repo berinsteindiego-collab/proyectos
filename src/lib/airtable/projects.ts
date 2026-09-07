@@ -1,7 +1,7 @@
 import { listRecords, isMockMode, type AirtableRecord } from "./client";
 import { EVENT_FIELDS, EVENTOS_TABLE } from "./fields";
 import { getTasksForEvent } from "./tasks";
-import { normalizeProject } from "../project-status/normalize";
+import { normalizeProject, toReadinessPercent } from "../project-status/normalize";
 import { searchMockProjects, findMockProjectById, listMockUpcoming } from "./mock-data";
 import {
   AmbiguousProjectError,
@@ -16,7 +16,7 @@ function toSearchResult(record: AirtableRecord): ProjectSearchResult {
     id: record.id,
     name: (f[EVENT_FIELDS.name] as string) ?? "(sin nombre)",
     status: f[EVENT_FIELDS.status] as string | undefined,
-    readiness: (f[EVENT_FIELDS.readiness] as number | undefined) ?? null,
+    readiness: toReadinessPercent(f[EVENT_FIELDS.readiness]) ?? null,
     daysToLaunch: (f[EVENT_FIELDS.daysToLaunch] as number | undefined) ?? null,
     startDate: (f[EVENT_FIELDS.startDate] as string | undefined) ?? null,
   };

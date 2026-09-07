@@ -5,7 +5,7 @@
 // bulk reads (Eventos + Tareas) instead of one Airtable call per project.
 import { listRecords, isMockMode } from "./client";
 import { EVENT_FIELDS, TAREAS_TABLE, EVENTOS_TABLE } from "./fields";
-import { normalizeTask } from "../project-status/normalize";
+import { normalizeTask, toReadinessPercent } from "../project-status/normalize";
 import { TERMINAL_TASK_STATUSES, type ProjectTask } from "../project-status/types";
 import { MOCK_PROJECTS } from "./mock-data";
 
@@ -85,7 +85,7 @@ export async function getOverviewAlerts(): Promise<OverviewAlerts> {
       id: e.id,
       name: (e.fields[EVENT_FIELDS.name] as string) ?? "(sin nombre)",
       status: e.fields[EVENT_FIELDS.status] as string | undefined,
-      readiness: (e.fields[EVENT_FIELDS.readiness] as number | undefined) ?? null,
+      readiness: toReadinessPercent(e.fields[EVENT_FIELDS.readiness]) ?? null,
     }));
 
   const overdueTasks: OverviewTaskAlert[] = [];
