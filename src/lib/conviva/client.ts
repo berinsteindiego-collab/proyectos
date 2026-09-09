@@ -1,4 +1,4 @@
-const CONVIVA_METRICS_URL = "https://instant-filter-us-east-1-prod.conviva.com/v1.0/metrics?mode=ei";
+const CONVIVA_BASE_URL = "https://api.conviva.com/insights/3.0/real-time-metrics";
 
 export interface ConvivaBreakdownItem {
   name: string;
@@ -18,34 +18,37 @@ export interface ConvivaLiveSnapshot {
   updatedAt: string;
 }
 
-type ConvivaGroupBy = "c3.video.isLive" | "title" | "GEO_COUNTRY" | "m3.dv.n";
-
-interface ConvivaResultRow {
-  ConcurrentPlays?: number;
-  name?: string[];
-  value?: string[];
-  title?: string;
-  GEO_COUNTRY?: string;
-  "m3.dv.n"?: string;
-  "c3.video.isLive"?: string;
+interface ConvivaMetricValue {
+  count?: number;
 }
 
-interface ConvivaDataPoint {
-  timestamp?: string;
-  results?: ConvivaResultRow[];
+interface ConvivaDimension {
+  key?: string;
+  value?: string;
 }
 
-interface ConvivaTotalPoint {
-  timestamp?: string;
-  results?: { ConcurrentPlays?: number };
+interface ConvivaDimensionalRow {
+  dimension?: ConvivaDimension;
+  metrics?: Record<string, ConvivaMetricValue | undefined>;
 }
 
-interface ConvivaMetricsResponseItem {
-  data?: ConvivaDataPoint[];
-  totals?: ConvivaTotalPoint[];
+interface ConvivaTimestamp {
+  epoch_ms?: number;
+  iso_date?: string;
 }
 
-type ConvivaMetricsResponse = ConvivaMetricsResponseItem[];
+interface ConvivaTimeSeriesPoint {
+  timestamp?: ConvivaTimestamp;
+  dimensional_data?: ConvivaDimensionalRow[];
+  [metricName: string]: unknown;
+}
+
+interface ConvivaMetricsV3Response {
+  time_series?: ConvivaTimeSeriesPoint[];
+  total?: Record<string, ConvivaMetricValue | undefined>;
+}
+
+type GroupByDimension = "asset" | "device-name" | "geo-country-code" | "content-category";
 
 function authHeader(): string {
   const id = process.env.CONVIVA_CLIENT_ID;
@@ -56,69 +59,39 @@ function authHeader(): string {
   return `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`;
 }
 
-function currentInterval(): string {
-  const end = new Date();
-  const start = new Date(end.getTime() - 15 * 60 * 1000);
-  return `${start.toISOString()}/${end.toISOString()}`;
+function normalizeText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es")
+    .trim();
 }
 
-function buildPayload(titleQuery: string, groupBy: ConvivaGroupBy) {
-  return {
-    queries: [
-      {
-        type: "group-by",
-        dataset: "ExperienceInsights",
-        metrics: ["ConcurrentPlays"],
-        interval: currentInterval(),
-        granularity: "ALL",
-        filter: [
-          [
-            {
-              field: "title",
-              key: null,
-              op: "contains",
-              display: titleQuery,
-              value: titleQuery,
-              _order: 0,
-            },
-          ],
-        ],
-        limit: 200,
-        groupBy: [groupBy],
-        orderBy: "desc",
-        sortBy: [{ metric: "ConcurrentPlays", order: "desc" }],
-        options: {
-          withTotals: true,
-          kpiConfig: {
-            TabletBitrateKbps: 400,
-            ConnectionInducedRebufferingRatio: 0.4,
-            kpiID: 1,
-            BitrateKbps: 200,
-            kpiName: "Conviva Good",
-            ConnectionInducedRebufferingTimeMilliSec: 2000,
-            VideoStartupTimeMilliSec: 10000,
-            SessionTimeMilliSec: 10000,
-            TVBitrateKbps: 800,
-          },
-        },
-        context: "video",
-        isLiveMode: true,
-        _rkey: 0,
-        ignoreInterval: true,
-      },
-    ],
-  };
+function buildGroupByUrl(dimension: GroupByDimension, assets: string[] = []): string {
+  const url = new URL(`${CONVIVA_BASE_URL}/concurrent-plays/group-by/${dimension}`);
+  url.searchParams.set("minutes", "5");
+  url.searchParams.set("granularity", "PT1M");
+  url.searchParams.set("limit", dimension === "asset" ? "500" : "200");
+  url.searchParams.set("sort_by", "concurrent-plays");
+  url.searchParams.set("order", "desc");
+
+  for (const asset of assets) {
+    url.searchParams.append("asset", asset);
+  }
+
+  return url.toString();
 }
 
-async function convivaMetrics(titleQuery: string, groupBy: ConvivaGroupBy): Promise<ConvivaMetricsResponseItem> {
-  const res = await fetch(CONVIVA_METRICS_URL, {
-    method: "POST",
+async function convivaGroupBy(
+  dimension: GroupByDimension,
+  assets: string[] = []
+): Promise<ConvivaMetricsV3Response> {
+  const res = await fetch(buildGroupByUrl(dimension, assets), {
+    method: "GET",
     headers: {
       Authorization: authHeader(),
       Accept: "application/json",
-      "Content-Type": "application/json",
     },
-    body: JSON.stringify(buildPayload(titleQuery, groupBy)),
     cache: "no-store",
   });
 
@@ -127,49 +100,71 @@ async function convivaMetrics(titleQuery: string, groupBy: ConvivaGroupBy): Prom
     throw new Error(`Conviva respondió ${res.status}${text ? `: ${text.slice(0, 180)}` : ""}`);
   }
 
-  const body = (await res.json()) as ConvivaMetricsResponse;
-  return body[0] ?? {};
+  return (await res.json()) as ConvivaMetricsV3Response;
 }
 
-function latestDataPoint(response: ConvivaMetricsResponseItem): ConvivaDataPoint | undefined {
-  const data = response.data ?? [];
-  return data.length ? data[data.length - 1] : undefined;
+function latestPoint(response: ConvivaMetricsV3Response): ConvivaTimeSeriesPoint | undefined {
+  const points = response.time_series ?? [];
+  return points.length ? points[points.length - 1] : undefined;
 }
 
-function totalConcurrent(response: ConvivaMetricsResponseItem): number {
-  const totals = response.totals ?? [];
-  const latest = totals.length ? totals[totals.length - 1] : undefined;
-  return Number(latest?.results?.ConcurrentPlays ?? 0);
+function metricCount(row: ConvivaDimensionalRow): number {
+  return Number(row.metrics?.["concurrent-plays"]?.count ?? 0);
 }
 
-function rowName(row: ConvivaResultRow): string {
-  return row.name?.[0] ?? row.title ?? row["m3.dv.n"] ?? row.value?.[0] ?? "Unknown";
+function rows(response: ConvivaMetricsV3Response): ConvivaDimensionalRow[] {
+  return latestPoint(response)?.dimensional_data ?? [];
 }
 
-function toBreakdown(response: ConvivaMetricsResponseItem, limit = 8): ConvivaBreakdownItem[] {
-  const rows = latestDataPoint(response)?.results ?? [];
-  const total = totalConcurrent(response);
+function rowValue(row: ConvivaDimensionalRow): string {
+  return row.dimension?.value?.trim() || "Unknown";
+}
 
-  return rows
-    .map((row) => ({ name: rowName(row), value: Number(row.ConcurrentPlays ?? 0) }))
-    .filter((row) => row.value > 0)
+function percentage(value: number, total: number): number | undefined {
+  return total > 0 ? Math.round((value / total) * 1000) / 10 : undefined;
+}
+
+function breakdownFromRows(
+  source: ConvivaDimensionalRow[],
+  total: number,
+  limit = 8,
+  nameTransform?: (value: string) => string
+): ConvivaBreakdownItem[] {
+  return source
+    .map((row) => {
+      const value = metricCount(row);
+      const rawName = rowValue(row);
+      return {
+        name: nameTransform ? nameTransform(rawName) : rawName,
+        value,
+        percentage: percentage(value, total),
+      };
+    })
+    .filter((item) => item.value > 0)
     .sort((a, b) => b.value - a.value)
-    .slice(0, limit)
-    .map((row) => ({
-      ...row,
-      percentage: total > 0 ? Math.round((row.value / total) * 1000) / 10 : undefined,
-    }));
+    .slice(0, limit);
 }
 
-function liveVod(response: ConvivaMetricsResponseItem): { live: number; vod: number } {
-  const rows = latestDataPoint(response)?.results ?? [];
+function countryName(code: string): string {
+  const upper = code.toUpperCase();
+  try {
+    const displayNames = new Intl.DisplayNames(["es"], { type: "region" });
+    return displayNames.of(upper) ?? upper;
+  } catch {
+    return upper;
+  }
+}
+
+function liveVodFromRows(source: ConvivaDimensionalRow[]): { live: number; vod: number } {
   let live = 0;
   let vod = 0;
 
-  for (const row of rows) {
-    const key = row["c3.video.isLive"] ?? row.value?.[0];
-    if (key === "T") live += Number(row.ConcurrentPlays ?? 0);
-    if (key === "F") vod += Number(row.ConcurrentPlays ?? 0);
+  for (const row of source) {
+    const raw = normalizeText(rowValue(row));
+    const value = metricCount(row);
+
+    if (["t", "true", "live", "en vivo"].includes(raw)) live += value;
+    if (["f", "false", "vod", "on demand", "video on demand"].includes(raw)) vod += value;
   }
 
   return { live, vod };
@@ -179,30 +174,52 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
   const title = titleQuery.trim();
   if (!title) throw new Error("Falta el título para consultar Conviva.");
 
-  const [liveResponse, titleResponse, countryResponse, deviceResponse] = await Promise.all([
-    convivaMetrics(title, "c3.video.isLive"),
-    convivaMetrics(title, "title"),
-    convivaMetrics(title, "GEO_COUNTRY"),
-    convivaMetrics(title, "m3.dv.n"),
+  // Metrics V3 dimensional filters are exact-match. To preserve the natural
+  // "contains" behavior from Pulse, first retrieve the top active assets and
+  // resolve the user's partial title locally, then use those exact assets as
+  // repeated OR filters for the remaining breakdowns.
+  const assetResponse = await convivaGroupBy("asset");
+  const normalizedTitle = normalizeText(title);
+  const matchedRows = rows(assetResponse).filter((row) =>
+    normalizeText(rowValue(row)).includes(normalizedTitle)
+  );
+
+  const matchedAssets = matchedRows.map(rowValue);
+  const concurrentPlays = matchedRows.reduce((sum, row) => sum + metricCount(row), 0);
+  const titles = breakdownFromRows(matchedRows, concurrentPlays, 20);
+  const updatedAt = latestPoint(assetResponse)?.timestamp?.iso_date ?? new Date().toISOString();
+
+  if (!matchedAssets.length) {
+    return {
+      titleQuery: title,
+      matchedAssets: [],
+      concurrentPlays: 0,
+      liveConcurrentPlays: 0,
+      vodConcurrentPlays: 0,
+      titles: [],
+      countries: [],
+      devices: [],
+      updatedAt,
+    };
+  }
+
+  const [countryResponse, deviceResponse, categoryResponse] = await Promise.all([
+    convivaGroupBy("geo-country-code", matchedAssets),
+    convivaGroupBy("device-name", matchedAssets),
+    convivaGroupBy("content-category", matchedAssets),
   ]);
 
-  const titles = toBreakdown(titleResponse, 20);
-  const { live, vod } = liveVod(liveResponse);
-  const concurrentPlays = totalConcurrent(liveResponse) || totalConcurrent(titleResponse);
-  const updatedAt =
-    latestDataPoint(liveResponse)?.timestamp ??
-    latestDataPoint(titleResponse)?.timestamp ??
-    new Date().toISOString();
+  const { live, vod } = liveVodFromRows(rows(categoryResponse));
 
   return {
     titleQuery: title,
-    matchedAssets: titles.map((item) => item.name),
+    matchedAssets,
     concurrentPlays,
     liveConcurrentPlays: live,
     vodConcurrentPlays: vod,
     titles,
-    countries: toBreakdown(countryResponse),
-    devices: toBreakdown(deviceResponse),
+    countries: breakdownFromRows(rows(countryResponse), concurrentPlays, 8, countryName),
+    devices: breakdownFromRows(rows(deviceResponse), concurrentPlays, 8),
     updatedAt,
   };
 }
