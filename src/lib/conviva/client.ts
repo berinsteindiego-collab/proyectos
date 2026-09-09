@@ -51,15 +51,13 @@ interface ConvivaMetricsV3Response {
 
 type GroupByDimension =
   | "asset"
-  | "video-asset-name"
+  | "dimension-tag/title"
   | "device-name"
   | "geo-country-code"
-  | "content-category"
-  | "content-meta-show-title";
+  | "content-category";
 
 type SortOrder = "asc" | "desc";
-
-type FilterName = "asset" | "video_asset_name" | "content_meta_show_title";
+type FilterName = "asset" | "tag_title";
 
 interface ConvivaFilter {
   name: FilterName;
@@ -91,7 +89,7 @@ function buildGroupByUrl(
   const url = new URL(`${CONVIVA_BASE_URL}/concurrent-plays/group-by/${dimension}`);
   url.searchParams.set("minutes", "5");
   url.searchParams.set("granularity", "PT1M");
-  url.searchParams.set("limit", dimension === "asset" || dimension === "video-asset-name" ? "500" : "200");
+  url.searchParams.set("limit", dimension === "asset" || dimension === "dimension-tag/title" ? "500" : "200");
   url.searchParams.set("sort_by", "concurrent-plays");
   url.searchParams.set("order", order);
 
@@ -227,97 +225,75 @@ function liveVodFromRows(source: ConvivaDimensionalRow[]): { live: number; vod: 
   return { live, vod };
 }
 
-function isForbidden(error: unknown): boolean {
-  return error instanceof Error && /Conviva respondió 403/.test(error.message);
+async function resolveTitleValues(title: string): Promise<string[]> {
+  const [desc, asc] = await Promise.all([
+    convivaGroupBy("dimension-tag/title", [], "desc"),
+    convivaGroupBy("dimension-tag/title", [], "asc"),
+  ]);
+  const normalizedTitle = normalizeText(title);
+
+  return mergeRows(rows(desc), rows(asc))
+    .map(rowValue)
+    .filter((value) => normalizeText(value).includes(normalizedTitle));
 }
 
-async function resolveDimensionValues(
-  dimension: GroupByDimension,
-  title: string
-): Promise<string[] | null> {
-  try {
-    const [desc, asc] = await Promise.all([
-      convivaGroupBy(dimension, [], "desc"),
-      convivaGroupBy(dimension, [], "asc"),
-    ]);
-    const normalizedTitle = normalizeText(title);
+async function resolveAssetsFallback(title: string): Promise<string[]> {
+  const [desc, asc] = await Promise.all([
+    convivaGroupBy("asset", [], "desc"),
+    convivaGroupBy("asset", [], "asc"),
+  ]);
+  const normalizedTitle = normalizeText(title);
 
-    return mergeRows(rows(desc), rows(asc))
-      .map(rowValue)
-      .filter((value) => normalizeText(value).includes(normalizedTitle));
-  } catch (error) {
-    if (isForbidden(error)) return null;
-    throw error;
-  }
+  return mergeRows(rows(desc), rows(asc))
+    .map(rowValue)
+    .filter((value) => normalizeText(value).includes(normalizedTitle));
 }
 
 function filtersFor(values: string[], name: FilterName): ConvivaFilter[] {
   return values.map((value) => ({ name, value }));
 }
 
-interface FamilyResolution {
-  filters: ConvivaFilter[];
-  titleDimension: GroupByDimension;
-}
-
-async function resolveFamily(title: string): Promise<FamilyResolution | null> {
-  // Best option: show-title metadata, when the Conviva account exposes it.
-  const showTitles = await resolveDimensionValues("content-meta-show-title", title);
-  if (showTitles?.length) {
-    return {
-      filters: filtersFor(showTitles, "content_meta_show_title"),
-      titleDimension: "video-asset-name",
-    };
-  }
-
-  // Many accounts expose c3.cp.an (Video Asset Name) even when show-title is
-  // restricted. It is closer to Pulse's visible Title than the raw `asset`
-  // dimension, which can contain mediaId/session suffixes and fragment a title.
-  const videoAssetNames = await resolveDimensionValues("video-asset-name", title);
-  if (videoAssetNames?.length) {
-    return {
-      filters: filtersFor(videoAssetNames, "video_asset_name"),
-      titleDimension: "video-asset-name",
-    };
-  }
-
-  // Last-resort compatibility path for accounts where only raw asset is usable.
-  const assets = await resolveDimensionValues("asset", title);
-  if (assets?.length) {
-    return {
-      filters: filtersFor(assets, "asset"),
-      titleDimension: "asset",
-    };
-  }
-
-  return null;
-}
-
 export async function getConvivaLiveSnapshot(titleQuery: string): Promise<ConvivaLiveSnapshot> {
   const title = titleQuery.trim();
   if (!title) throw new Error("Falta el título para consultar Conviva.");
 
-  const family = await resolveFamily(title);
+  // This account explicitly exposes the custom `Title` dimension as
+  // /dimension-tag/title with the public query filter `tag_title`.
+  // Resolve against that dimension first because it matches the Title field
+  // used in Pulse much more closely than the raw technical asset dimension.
+  const matchedTitles = await resolveTitleValues(title);
 
-  if (!family) {
-    return {
-      titleQuery: title,
-      matchedAssets: [],
-      concurrentPlays: 0,
-      liveConcurrentPlays: 0,
-      vodConcurrentPlays: 0,
-      titles: [],
-      countries: [],
-      devices: [],
-      updatedAt: new Date().toISOString(),
-    };
+  let familyFilters: ConvivaFilter[];
+  let titleDimension: GroupByDimension;
+
+  if (matchedTitles.length) {
+    familyFilters = filtersFor(matchedTitles, "tag_title");
+    titleDimension = "dimension-tag/title";
+  } else {
+    const fallbackAssets = await resolveAssetsFallback(title);
+    if (!fallbackAssets.length) {
+      return {
+        titleQuery: title,
+        matchedAssets: [],
+        concurrentPlays: 0,
+        liveConcurrentPlays: 0,
+        vodConcurrentPlays: 0,
+        titles: [],
+        countries: [],
+        devices: [],
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    familyFilters = filtersFor(fallbackAssets, "asset");
+    titleDimension = "asset";
   }
 
   const [titleResponse, countryResponse, deviceResponse, liveVodResponse] = await Promise.all([
-    convivaGroupBy(family.titleDimension, family.filters),
-    convivaGroupBy("geo-country-code", family.filters),
-    convivaGroupBy("device-name", family.filters),
-    convivaGroupBy("content-category", family.filters),
+    convivaGroupBy(titleDimension, familyFilters),
+    convivaGroupBy("geo-country-code", familyFilters),
+    convivaGroupBy("device-name", familyFilters),
+    convivaGroupBy("content-category", familyFilters),
   ]);
 
   const titleRows = rows(titleResponse);
@@ -327,7 +303,7 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
     titleRows,
     concurrentPlays,
     20,
-    family.titleDimension === "asset" ? cleanAssetName : undefined
+    titleDimension === "asset" ? cleanAssetName : undefined
   );
   const selected = selectedPointInfo(titleResponse);
   const updatedAt = selected.point?.timestamp?.iso_date ?? new Date().toISOString();
