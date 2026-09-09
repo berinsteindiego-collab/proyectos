@@ -26,6 +26,7 @@ const EXAMPLES = [
 ];
 
 const LIVE_WORDS = /\b(viewers?|usuarios?|concurrentes?|viendo|audiencia|pa[ií]ses?|dispositivos?|devices?|live)\b/i;
+const DAILY_BRIEF = /^(?:dame\s+)?(?:el\s+)?resumen\s+de\s+hoy[.!?¡¿]*$/i;
 const HISTORY_KEY = "project-control-recent-questions";
 
 function suggestionsFor(m: ChatMessage): string[] {
@@ -54,11 +55,7 @@ function pickAudioMimeType(): string | undefined {
 }
 
 function cleanLiveTitle(text: string): string {
-  return text
-    .replace(/[¿?¡!.,;:]+$/g, "")
-    .replace(/\b(ahora|en vivo|live)\s*$/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return text.replace(/[¿?¡!.,;:]+$/g, "").replace(/\b(ahora|en vivo|live)\s*$/i, "").replace(/\s+/g, " ").trim();
 }
 
 function extractLiveTitle(text: string): string {
@@ -71,18 +68,11 @@ function extractLiveTitle(text: string): string {
     /\b(?:pa[ií]ses?|dispositivos?|devices?)\b.*?\b(?:de|en)\s+(.+)$/i,
     /\bt[ií]tulos?\b.*?\bde\s+(.+)$/i,
   ];
-
   for (const pattern of patterns) {
     const match = cleaned.match(pattern);
     if (match?.[1]) return cleanLiveTitle(match[1]);
   }
-
-  return cleanLiveTitle(
-    cleaned
-      .replace(/\b(cu[aá]ntos?|cu[aá]ntas?|usuarios?|viewers?|concurrentes?|hay|est[aá]n?|viendo|ven|ver|se|ve|qu[eé]|pa[ií]ses?|dispositivos?|devices?|ahora|live|audiencia|principal|m[aá]s|t[ií]tulos?)\b/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
+  return cleanLiveTitle(cleaned.replace(/\b(cu[aá]ntos?|cu[aá]ntas?|usuarios?|viewers?|concurrentes?|hay|est[aá]n?|viendo|ven|ver|se|ve|qu[eé]|pa[ií]ses?|dispositivos?|devices?|ahora|live|audiencia|principal|m[aá]s|t[ií]tulos?)\b/gi, " ").replace(/\s+/g, " ").trim());
 }
 
 export default function AskBox() {
@@ -117,6 +107,14 @@ export default function AskBox() {
     setMessages(next); setInput(""); setLoading(true); setError(null);
 
     try {
+      if (DAILY_BRIEF.test(text.trim())) {
+        const briefRes = await fetch("/api/brief", { cache: "no-store" });
+        const briefBody = await briefRes.json();
+        if (!briefRes.ok) throw new Error(briefBody.error ?? "No se pudo generar el resumen de hoy.");
+        setMessages([...next, { role: "assistant", content: briefBody.reply }]);
+        return;
+      }
+
       if (LIVE_WORDS.test(text)) {
         const title = extractLiveTitle(text);
         if (title) {
@@ -124,9 +122,7 @@ export default function AskBox() {
           const liveBody = await liveRes.json();
           if (!liveRes.ok) throw new Error(liveBody.error ?? "No se pudo consultar Conviva.");
           const live = liveBody.live as LiveSnapshotData;
-          const reply = live.matchedAssets.length
-            ? `Encontré ${live.concurrentPlays.toLocaleString("es-AR")} usuarios concurrentes para títulos que contienen “${title}”.`
-            : `No encontré sesiones activas para títulos que contengan “${title}”.`;
+          const reply = live.matchedAssets.length ? `Encontré ${live.concurrentPlays.toLocaleString("es-AR")} usuarios concurrentes para títulos que contienen “${title}”.` : `No encontré sesiones activas para títulos que contengan “${title}”.`;
           setMessages([...next, { role: "assistant", content: reply, live }]);
           return;
         }
@@ -140,9 +136,8 @@ export default function AskBox() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Error desconocido");
       setMessages([...next, { role: "assistant", content: body.reply, matches: body.matches, status: body.status, list: body.list }]);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally { setLoading(false); }
+    } catch (err) { setError((err as Error).message); }
+    finally { setLoading(false); }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -190,25 +185,15 @@ export default function AskBox() {
           <div className="mx-auto inline-flex rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">Project Control AI</div>
           <h1 className="mt-3 text-2xl font-semibold text-slate-900 dark:text-slate-100">Preguntale a Project Control</h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">Consultá proyectos, próximos eventos, deadlines, feeds, standalones y audiencia en vivo con tus propias palabras.</p>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-            {EXAMPLES.map((ex) => <button key={ex} onClick={() => sendText(ex)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{ex}</button>)}
-          </div>
-          {recent.length > 0 && (
-            <div className="mx-auto mt-6 max-w-2xl border-t border-slate-100 pt-4 text-left dark:border-slate-800">
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recientes</p>
-              <div className="flex flex-wrap gap-2">{recent.slice(0, 4).map((q) => <button key={q} onClick={() => sendText(q)} className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800">↻ {q}</button>)}</div>
-            </div>
-          )}
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{EXAMPLES.map((ex) => <button key={ex} onClick={() => sendText(ex)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{ex}</button>)}</div>
+          {recent.length > 0 && <div className="mx-auto mt-6 max-w-2xl border-t border-slate-100 pt-4 text-left dark:border-slate-800"><p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recientes</p><div className="flex flex-wrap gap-2">{recent.slice(0, 4).map((q) => <button key={q} onClick={() => sendText(q)} className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800">↻ {q}</button>)}</div></div>}
         </div>
       ) : (
         <div className="flex-1 space-y-4 overflow-y-auto pb-4">
           {messages.map((m, i) => (
             <div key={i} className={m.role === "user" ? "flex justify-end" : "flex flex-col gap-3"}>
               {m.role === "user" ? <div className="max-w-[85%] rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white dark:bg-indigo-600">{m.content}</div> : <>
-                <div className="group max-w-[85%] rounded-2xl bg-white px-4 py-3 text-sm text-slate-800 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-800">
-                  <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-                  <button onClick={() => copyAnswer(m.content)} className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-600"><CopyIcon /> Copiar resumen</button>
-                </div>
+                <div className="group max-w-[85%] rounded-2xl bg-white px-4 py-3 text-sm text-slate-800 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:text-slate-200"><div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div><button onClick={() => copyAnswer(m.content)} className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-600"><CopyIcon /> Copiar resumen</button></div>
                 {m.matches && m.matches.length > 0 && <div className="flex max-w-[85%] flex-wrap gap-2">{m.matches.map((match) => <button key={match.id} onClick={() => sendText(match.name)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{match.name}</button>)}</div>}
                 {m.list && <ListCards list={m.list} />}
                 {m.live && <LiveSnapshot live={m.live} />}
@@ -223,9 +208,9 @@ export default function AskBox() {
       )}
       {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-400">{error}</p>}
       <div className="sticky bottom-0 flex items-end gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} rows={1} placeholder={recording ? "Escuchando..." : transcribing ? "Transcribiendo..." : "Preguntá por un proyecto, evento, audiencia, feeds o standalones..."} disabled={recording || transcribing} className="max-h-32 flex-1 resize-none rounded-xl border-none bg-transparent px-2 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100" />
-        {micSupported && <button onClick={toggleRecording} disabled={transcribing || loading} title={recording ? "Detener grabación" : "Preguntar por voz"} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 ${recording ? "animate-pulse bg-red-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"}`}><MicIcon /></button>}
-        <button onClick={() => sendText(input.trim())} disabled={loading || recording || transcribing || !input.trim()} title="Enviar" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition hover:bg-indigo-500 disabled:opacity-40"><SendIcon /></button>
+        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} rows={1} placeholder={recording ? "Escuchando..." : transcribing ? "Transcribiendo..." : "Preguntá por un proyecto, evento, audiencia, feeds o standalones..."} disabled={recording || transcribing} className="max-h-32 flex-1 resize-none rounded-xl border-none bg-transparent px-2 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-200" />
+        {micSupported && <button onClick={toggleRecording} disabled={transcribing} aria-label={recording ? "Detener grabación" : "Hablar"} className={`flex h-9 w-9 items-center justify-center rounded-full transition ${recording ? "animate-pulse bg-red-500 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"}`}><MicIcon /></button>}
+        <button onClick={() => sendText(input.trim())} disabled={!input.trim() || loading || recording || transcribing} aria-label="Enviar" className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-500 text-white transition hover:bg-indigo-600 disabled:opacity-40"><SendIcon /></button>
       </div>
     </div>
   );
