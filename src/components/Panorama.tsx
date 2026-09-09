@@ -29,10 +29,10 @@ function Card({
         : "text-slate-950 dark:text-white";
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{eyebrow}</p>
-      <p className={`mt-2 text-3xl font-semibold tracking-tight ${accent}`}>{value}</p>
-      <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-400">{detail}</p>
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-5 dark:border-slate-800 dark:bg-slate-900">
+      <p className="text-[10px] font-semibold uppercase leading-4 tracking-wider text-slate-400 sm:text-[11px]">{eyebrow}</p>
+      <p className={`mt-2 text-2xl font-semibold tracking-tight sm:text-3xl ${accent}`}>{value}</p>
+      <p className="mt-1 text-xs leading-4 text-slate-500 sm:text-sm sm:leading-5 dark:text-slate-400">{detail}</p>
     </div>
   );
 }
@@ -51,13 +51,13 @@ export default function Panorama() {
   const next = data.upcomingProjects[0];
 
   return (
-    <section className="mb-7">
+    <section className="mb-6 sm:mb-7">
       <div className="mb-3">
         <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Panorama</h2>
         <p className="mt-0.5 text-xs text-slate-500">Lo que necesita atención ahora.</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
         <Card
           eyebrow="Próximo evento"
           value={next?.daysToLaunch != null ? `${next.daysToLaunch}d` : "—"}
@@ -83,9 +83,7 @@ export default function Panorama() {
         />
       </div>
 
-      <p className="mt-3 text-[11px] text-slate-400">
-        {data.activeProjects} proyectos activos en seguimiento
-      </p>
+      <p className="mt-3 text-[11px] text-slate-400">{data.activeProjects} proyectos activos en seguimiento</p>
     </section>
   );
 }
