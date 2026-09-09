@@ -125,7 +125,8 @@ function selectedPointInfo(response: ConvivaMetricsV3Response): {
 }
 
 function metricCount(row: ConvivaDimensionalRow): number {
-  return Number(row.metrics?.["concurrent-plays"]?.count ?? 0);
+  const metric = row.metrics?.["concurrent_plays"] ?? row.metrics?.["concurrent-plays"];
+  return Number(metric?.count ?? 0);
 }
 
 function rows(response: ConvivaMetricsV3Response): ConvivaDimensionalRow[] {
