@@ -18,20 +18,28 @@ function compact(value: number) {
 
 function Breakdown({ title, items }: { title: string; items: LiveSnapshotData["countries"] }) {
   if (!items.length) return null;
+
   return (
-    <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</p>
-      <div className="mt-2 space-y-2">
+    <section className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{title}</p>
+
+      <div className="mt-3 divide-y divide-slate-200/70 dark:divide-slate-800">
         {items.slice(0, 5).map((item) => (
-          <div key={item.name} className="flex items-center justify-between gap-3 text-sm">
-            <span className="truncate text-slate-700 dark:text-slate-300">{item.name}</span>
-            <span className="font-medium text-slate-900 dark:text-slate-100">
-              {compact(item.value)}{item.percentage != null ? ` · ${item.percentage}%` : ""}
+          <div key={item.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 py-2.5 first:pt-0 last:pb-0">
+            <span
+              className="min-w-0 text-[13px] leading-5 text-slate-700 dark:text-slate-300"
+              title={item.name}
+            >
+              {item.name}
+            </span>
+
+            <span className="whitespace-nowrap text-right text-[13px] font-semibold tabular-nums text-slate-950 dark:text-white">
+              {compact(item.value)}
             </span>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -56,18 +64,23 @@ export default function LiveSnapshot({ live }: { live: LiveSnapshotData }) {
 
       {(live.liveConcurrentPlays > 0 || live.vodConcurrentPlays > 0) && (
         <div className="mt-4 flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full bg-red-50 px-3 py-1.5 font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">Live {compact(live.liveConcurrentPlays)}</span>
-          <span className="rounded-full bg-slate-100 px-3 py-1.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">VoD {compact(live.vodConcurrentPlays)}</span>
+          <span className="rounded-full bg-red-50 px-3 py-1.5 font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            Live {compact(live.liveConcurrentPlays)}
+          </span>
+          <span className="rounded-full bg-slate-100 px-3 py-1.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            VoD {compact(live.vodConcurrentPlays)}
+          </span>
         </div>
       )}
 
       {(live.titles.length > 0 || live.countries.length > 0 || live.devices.length > 0) && (
-        <div className="mt-5 grid gap-5 border-t border-slate-100 pt-4 md:grid-cols-3 dark:border-slate-800">
+        <div className="mt-5 grid gap-3 border-t border-slate-100 pt-5 md:grid-cols-3 dark:border-slate-800">
           <Breakdown title="Títulos" items={live.titles} />
           <Breakdown title="Países" items={live.countries} />
           <Breakdown title="Dispositivos" items={live.devices} />
         </div>
       )}
+
       {live.matchedAssets.length === 0 && (
         <p className="mt-4 text-sm text-slate-500">No encontré títulos activos que contengan “{live.titleQuery}”.</p>
       )}
