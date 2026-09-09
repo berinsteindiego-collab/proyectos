@@ -27,24 +27,33 @@ function Breakdown({ title, items }: { title: string; items: LiveSnapshotData["c
   if (!items.length) return null;
 
   return (
-    <div className="min-w-0">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</p>
-      <div className="mt-3 space-y-2.5">
+    <section className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{title}</p>
+
+      <div className="mt-3 divide-y divide-slate-200/70 dark:divide-slate-800">
         {items.slice(0, 5).map((item) => (
-          <div key={item.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-sm">
-            <span className="min-w-0 break-words leading-snug text-slate-700 dark:text-slate-300" title={item.name}>
+          <div key={item.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+            <span
+              className="min-w-0 text-[13px] leading-5 text-slate-700 dark:text-slate-300"
+              title={item.name}
+            >
               {item.name}
             </span>
-            <span className="whitespace-nowrap text-right font-medium text-slate-900 dark:text-slate-100">
-              {compact(item.value)}
+
+            <div className="flex items-baseline gap-1.5 whitespace-nowrap text-right">
+              <span className="text-[13px] font-semibold tabular-nums text-slate-950 dark:text-white">
+                {compact(item.value)}
+              </span>
               {item.percentage != null && (
-                <span className="ml-1.5 font-normal text-slate-400">· {formatPercentage(item.percentage)}</span>
+                <span className="text-[12px] tabular-nums text-slate-400">
+                  {formatPercentage(item.percentage)}
+                </span>
               )}
-            </span>
+            </div>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -79,7 +88,7 @@ export default function LiveSnapshot({ live }: { live: LiveSnapshotData }) {
       )}
 
       {(live.titles.length > 0 || live.countries.length > 0 || live.devices.length > 0) && (
-        <div className="mt-5 grid gap-6 border-t border-slate-100 pt-5 md:grid-cols-3 dark:border-slate-800">
+        <div className="mt-5 grid gap-3 border-t border-slate-100 pt-5 md:grid-cols-3 dark:border-slate-800">
           <Breakdown title="Títulos" items={live.titles} />
           <Breakdown title="Países" items={live.countries} />
           <Breakdown title="Dispositivos" items={live.devices} />
