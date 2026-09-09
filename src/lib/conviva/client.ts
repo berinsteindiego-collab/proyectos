@@ -16,6 +16,12 @@ export interface ConvivaLiveSnapshot {
   countries: ConvivaBreakdownItem[];
   devices: ConvivaBreakdownItem[];
   updatedAt: string;
+  diagnostics?: {
+    activeAssetCount: number;
+    sampleAssets: string[];
+    pointCount: number;
+    selectedPointIndex: number;
+  };
 }
 
 interface ConvivaMetricValue {
@@ -103,9 +109,20 @@ async function convivaGroupBy(
   return (await res.json()) as ConvivaMetricsV3Response;
 }
 
-function latestPoint(response: ConvivaMetricsV3Response): ConvivaTimeSeriesPoint | undefined {
+// Real-time Metrics V3 can include the current minute before dimensional data
+// has landed. Use the newest point that actually contains dimensional rows
+// instead of blindly selecting the last array item.
+function selectedPointInfo(response: ConvivaMetricsV3Response): {
+  point?: ConvivaTimeSeriesPoint;
+  index: number;
+} {
   const points = response.time_series ?? [];
-  return points.length ? points[points.length - 1] : undefined;
+  for (let i = points.length - 1; i >= 0; i -= 1) {
+    if ((points[i]?.dimensional_data?.length ?? 0) > 0) {
+      return { point: points[i], index: i };
+    }
+  }
+  return { point: points.length ? points[points.length - 1] : undefined, index: points.length - 1 };
 }
 
 function metricCount(row: ConvivaDimensionalRow): number {
@@ -113,7 +130,7 @@ function metricCount(row: ConvivaDimensionalRow): number {
 }
 
 function rows(response: ConvivaMetricsV3Response): ConvivaDimensionalRow[] {
-  return latestPoint(response)?.dimensional_data ?? [];
+  return selectedPointInfo(response).point?.dimensional_data ?? [];
 }
 
 function rowValue(row: ConvivaDimensionalRow): string {
@@ -174,20 +191,24 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
   const title = titleQuery.trim();
   if (!title) throw new Error("Falta el título para consultar Conviva.");
 
-  // Metrics V3 dimensional filters are exact-match. To preserve the natural
-  // "contains" behavior from Pulse, first retrieve the top active assets and
-  // resolve the user's partial title locally, then use those exact assets as
-  // repeated OR filters for the remaining breakdowns.
   const assetResponse = await convivaGroupBy("asset");
+  const assetRows = rows(assetResponse);
   const normalizedTitle = normalizeText(title);
-  const matchedRows = rows(assetResponse).filter((row) =>
+  const matchedRows = assetRows.filter((row) =>
     normalizeText(rowValue(row)).includes(normalizedTitle)
   );
 
   const matchedAssets = matchedRows.map(rowValue);
   const concurrentPlays = matchedRows.reduce((sum, row) => sum + metricCount(row), 0);
   const titles = breakdownFromRows(matchedRows, concurrentPlays, 20);
-  const updatedAt = latestPoint(assetResponse)?.timestamp?.iso_date ?? new Date().toISOString();
+  const selected = selectedPointInfo(assetResponse);
+  const updatedAt = selected.point?.timestamp?.iso_date ?? new Date().toISOString();
+  const diagnostics = {
+    activeAssetCount: assetRows.length,
+    sampleAssets: assetRows.slice(0, 12).map(rowValue),
+    pointCount: assetResponse.time_series?.length ?? 0,
+    selectedPointIndex: selected.index,
+  };
 
   if (!matchedAssets.length) {
     return {
@@ -200,6 +221,7 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
       countries: [],
       devices: [],
       updatedAt,
+      diagnostics,
     };
   }
 
@@ -221,5 +243,6 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
     countries: breakdownFromRows(rows(countryResponse), concurrentPlays, 8, countryName),
     devices: breakdownFromRows(rows(deviceResponse), concurrentPlays, 8),
     updatedAt,
+    diagnostics,
   };
 }
