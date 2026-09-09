@@ -15,6 +15,7 @@ export interface LiveSnapshotData {
     sampleAssets: string[];
     pointCount: number;
     selectedPointIndex: number;
+    matchedRowSamples: string[];
   };
 }
 
@@ -97,6 +98,21 @@ export default function LiveSnapshot({ live }: { live: LiveSnapshotData }) {
               </ul>
             ) : (
               <p className="mt-1">No llegaron nombres de assets en dimensional_data.</p>
+            )}
+          </div>
+
+          <div className="mt-4 border-t border-amber-200 pt-3 dark:border-amber-900/60">
+            <p className="font-medium">Registros raw que hicieron match:</p>
+            {live.diagnostics.matchedRowSamples.length ? (
+              <div className="mt-2 space-y-2">
+                {live.diagnostics.matchedRowSamples.map((row, index) => (
+                  <pre key={index} className="max-h-44 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white/70 p-2 text-[10px] leading-relaxed dark:bg-black/20">
+                    {row}
+                  </pre>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1">No hay registros raw coincidentes.</p>
             )}
           </div>
         </div>
