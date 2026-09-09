@@ -21,6 +21,7 @@ export interface ConvivaLiveSnapshot {
     sampleAssets: string[];
     pointCount: number;
     selectedPointIndex: number;
+    matchedRowSamples: string[];
   };
 }
 
@@ -36,6 +37,7 @@ interface ConvivaDimension {
 interface ConvivaDimensionalRow {
   dimension?: ConvivaDimension;
   metrics?: Record<string, ConvivaMetricValue | undefined>;
+  [key: string]: unknown;
 }
 
 interface ConvivaTimestamp {
@@ -109,9 +111,6 @@ async function convivaGroupBy(
   return (await res.json()) as ConvivaMetricsV3Response;
 }
 
-// Real-time Metrics V3 can include the current minute before dimensional data
-// has landed. Use the newest point that actually contains dimensional rows
-// instead of blindly selecting the last array item.
 function selectedPointInfo(response: ConvivaMetricsV3Response): {
   point?: ConvivaTimeSeriesPoint;
   index: number;
@@ -187,6 +186,14 @@ function liveVodFromRows(source: ConvivaDimensionalRow[]): { live: number; vod: 
   return { live, vod };
 }
 
+function diagnosticRow(row: ConvivaDimensionalRow): string {
+  try {
+    return JSON.stringify(row);
+  } catch {
+    return "[No se pudo serializar el registro]";
+  }
+}
+
 export async function getConvivaLiveSnapshot(titleQuery: string): Promise<ConvivaLiveSnapshot> {
   const title = titleQuery.trim();
   if (!title) throw new Error("Falta el título para consultar Conviva.");
@@ -208,6 +215,7 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
     sampleAssets: assetRows.slice(0, 12).map(rowValue),
     pointCount: assetResponse.time_series?.length ?? 0,
     selectedPointIndex: selected.index,
+    matchedRowSamples: matchedRows.slice(0, 3).map(diagnosticRow),
   };
 
   if (!matchedAssets.length) {
