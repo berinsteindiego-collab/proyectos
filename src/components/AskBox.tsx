@@ -8,6 +8,13 @@ import ListCards from "@/components/ListCards";
 import LiveSnapshot, { type LiveSnapshotData } from "@/components/LiveSnapshot";
 import type { ListPayload, ProjectSearchResult, ProjectStatus } from "@/lib/project-status/types";
 
+interface BriefAction {
+  label: string;
+  reply?: string;
+  list?: ListPayload;
+  query?: string;
+}
+
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -15,6 +22,7 @@ interface ChatMessage {
   status?: ProjectStatus;
   list?: ListPayload;
   live?: LiveSnapshotData;
+  briefActions?: BriefAction[];
 }
 
 const EXAMPLES = [
@@ -100,6 +108,20 @@ export default function AskBox() {
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
   }
 
+  function openBriefAction(action: BriefAction) {
+    if (action.query) {
+      void sendText(action.query);
+      return;
+    }
+    if (!action.list) return;
+    const label = action.label.replace(/\s*\(\d+\)\s*$/, "");
+    setMessages((current) => [
+      ...current,
+      { role: "user", content: label },
+      { role: "assistant", content: action.reply ?? label, list: action.list },
+    ]);
+  }
+
   async function sendText(text: string) {
     if (!text || loading) return;
     remember(text);
@@ -111,7 +133,7 @@ export default function AskBox() {
         const briefRes = await fetch("/api/brief", { cache: "no-store" });
         const briefBody = await briefRes.json();
         if (!briefRes.ok) throw new Error(briefBody.error ?? "No se pudo generar el resumen de hoy.");
-        setMessages([...next, { role: "assistant", content: briefBody.reply }]);
+        setMessages([...next, { role: "assistant", content: briefBody.reply, briefActions: briefBody.actions }]);
         return;
       }
 
@@ -181,9 +203,9 @@ export default function AskBox() {
   return (
     <div className="flex flex-col">
       {empty ? (
-        <div className="py-8 text-center">
+        <div className="py-6 text-center sm:py-8">
           <div className="mx-auto inline-flex rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">Project Control AI</div>
-          <h1 className="mt-3 text-2xl font-semibold text-slate-900 dark:text-slate-100">Preguntale a Project Control</h1>
+          <h1 className="mt-3 text-xl font-semibold text-slate-900 sm:text-2xl dark:text-slate-100">Preguntale a Project Control</h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">Consultá proyectos, próximos eventos, deadlines, feeds, standalones y audiencia en vivo con tus propias palabras.</p>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{EXAMPLES.map((ex) => <button key={ex} onClick={() => sendText(ex)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{ex}</button>)}</div>
           {recent.length > 0 && <div className="mx-auto mt-6 max-w-2xl border-t border-slate-100 pt-4 text-left dark:border-slate-800"><p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recientes</p><div className="flex flex-wrap gap-2">{recent.slice(0, 4).map((q) => <button key={q} onClick={() => sendText(q)} className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800">↻ {q}</button>)}</div></div>}
@@ -192,13 +214,14 @@ export default function AskBox() {
         <div className="flex-1 space-y-4 overflow-y-auto pb-4">
           {messages.map((m, i) => (
             <div key={i} className={m.role === "user" ? "flex justify-end" : "flex flex-col gap-3"}>
-              {m.role === "user" ? <div className="max-w-[85%] rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white dark:bg-indigo-600">{m.content}</div> : <>
-                <div className="group max-w-[85%] rounded-2xl bg-white px-4 py-3 text-sm text-slate-800 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:text-slate-200"><div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div><button onClick={() => copyAnswer(m.content)} className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-600"><CopyIcon /> Copiar resumen</button></div>
-                {m.matches && m.matches.length > 0 && <div className="flex max-w-[85%] flex-wrap gap-2">{m.matches.map((match) => <button key={match.id} onClick={() => sendText(match.name)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{match.name}</button>)}</div>}
+              {m.role === "user" ? <div className="max-w-[92%] rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white sm:max-w-[85%] dark:bg-indigo-600">{m.content}</div> : <>
+                <div className="group max-w-full rounded-2xl bg-white px-4 py-3 text-sm text-slate-800 shadow-sm ring-1 ring-slate-100 sm:max-w-[85%] dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-800"><div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div><button onClick={() => copyAnswer(m.content)} className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-600"><CopyIcon /> Copiar resumen</button></div>
+                {m.briefActions && m.briefActions.length > 0 && <div className="flex max-w-full flex-col gap-2 sm:max-w-[85%] sm:flex-row sm:flex-wrap">{m.briefActions.map((action) => <button key={action.label} onClick={() => openBriefAction(action)} className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-left text-xs font-medium text-indigo-700 shadow-sm transition hover:bg-indigo-100 sm:rounded-full sm:py-1.5 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">{action.label}</button>)}</div>}
+                {m.matches && m.matches.length > 0 && <div className="flex max-w-full flex-wrap gap-2 sm:max-w-[85%]">{m.matches.map((match) => <button key={match.id} onClick={() => sendText(match.name)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{match.name}</button>)}</div>}
                 {m.list && <ListCards list={m.list} />}
                 {m.live && <LiveSnapshot live={m.live} />}
                 {m.status && <div className="max-w-full space-y-4"><ProjectBrief status={m.status} /><ProjectStatusDashboard status={m.status} /><TaskTable tasks={m.status.tasks} /></div>}
-                {i === messages.length - 1 && !loading && <div className="flex max-w-[85%] flex-wrap gap-2">{suggestionsFor(m).map((s) => <button key={s} onClick={() => sendText(s)} className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">{s}</button>)}</div>}
+                {i === messages.length - 1 && !loading && <div className="flex max-w-full flex-wrap gap-2 sm:max-w-[85%]">{suggestionsFor(m).map((s) => <button key={s} onClick={() => sendText(s)} className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">{s}</button>)}</div>}
               </>}
             </div>
           ))}
@@ -209,8 +232,8 @@ export default function AskBox() {
       {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-400">{error}</p>}
       <div className="sticky bottom-0 flex items-end gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} rows={1} placeholder={recording ? "Escuchando..." : transcribing ? "Transcribiendo..." : "Preguntá por un proyecto, evento, audiencia, feeds o standalones..."} disabled={recording || transcribing} className="max-h-32 flex-1 resize-none rounded-xl border-none bg-transparent px-2 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-200" />
-        {micSupported && <button onClick={toggleRecording} disabled={transcribing} aria-label={recording ? "Detener grabación" : "Hablar"} className={`flex h-9 w-9 items-center justify-center rounded-full transition ${recording ? "animate-pulse bg-red-500 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"}`}><MicIcon /></button>}
-        <button onClick={() => sendText(input.trim())} disabled={!input.trim() || loading || recording || transcribing} aria-label="Enviar" className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-500 text-white transition hover:bg-indigo-600 disabled:opacity-40"><SendIcon /></button>
+        {micSupported && <button onClick={toggleRecording} disabled={transcribing} aria-label={recording ? "Detener grabación" : "Hablar"} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition ${recording ? "animate-pulse bg-red-500 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"}`}><MicIcon /></button>}
+        <button onClick={() => sendText(input.trim())} disabled={!input.trim() || loading || recording || transcribing} aria-label="Enviar" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-white transition hover:bg-indigo-600 disabled:opacity-40"><SendIcon /></button>
       </div>
     </div>
   );
