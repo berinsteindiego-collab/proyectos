@@ -192,16 +192,27 @@ function countryName(code: string): string {
   }
 }
 
+function classifyLiveVod(value: string): "live" | "vod" | null {
+  const raw = normalizeText(value);
+
+  // Conviva Pulse exposes c3.video.isLive as T/F and labels those values
+  // Live/VoD. Metrics V3's public content-category dimension maps to that
+  // classification, so accept both raw values and display labels.
+  if (["t", "true", "live", "en vivo"].includes(raw)) return "live";
+  if (["f", "false", "vod", "vo d", "on demand", "video on demand"].includes(raw)) return "vod";
+  return null;
+}
+
 function liveVodFromRows(source: ConvivaDimensionalRow[]): { live: number; vod: number } {
   let live = 0;
   let vod = 0;
 
   for (const row of source) {
-    const raw = normalizeText(rowValue(row));
+    const kind = classifyLiveVod(rowValue(row));
     const value = metricCount(row);
 
-    if (["t", "true", "live", "en vivo"].includes(raw)) live += value;
-    if (["f", "false", "vod", "on demand", "video on demand"].includes(raw)) vod += value;
+    if (kind === "live") live += value;
+    if (kind === "vod") vod += value;
   }
 
   return { live, vod };
@@ -246,13 +257,13 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
     };
   }
 
-  const [countryResponse, deviceResponse, categoryResponse] = await Promise.all([
+  const [countryResponse, deviceResponse, liveVodResponse] = await Promise.all([
     convivaGroupBy("geo-country-code", matchedAssets),
     convivaGroupBy("device-name", matchedAssets),
     convivaGroupBy("content-category", matchedAssets),
   ]);
 
-  const { live, vod } = liveVodFromRows(rows(categoryResponse));
+  const { live, vod } = liveVodFromRows(rows(liveVodResponse));
 
   return {
     titleQuery: title,
