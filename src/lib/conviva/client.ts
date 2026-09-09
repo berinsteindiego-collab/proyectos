@@ -16,13 +16,6 @@ export interface ConvivaLiveSnapshot {
   countries: ConvivaBreakdownItem[];
   devices: ConvivaBreakdownItem[];
   updatedAt: string;
-  diagnostics?: {
-    activeAssetCount: number;
-    sampleAssets: string[];
-    pointCount: number;
-    selectedPointIndex: number;
-    matchedRowSamples: string[];
-  };
 }
 
 interface ConvivaMetricValue {
@@ -57,6 +50,7 @@ interface ConvivaMetricsV3Response {
 }
 
 type GroupByDimension = "asset" | "device-name" | "geo-country-code" | "content-category";
+type SortOrder = "asc" | "desc";
 
 function authHeader(): string {
   const id = process.env.CONVIVA_CLIENT_ID;
@@ -75,13 +69,17 @@ function normalizeText(value: string): string {
     .trim();
 }
 
-function buildGroupByUrl(dimension: GroupByDimension, assets: string[] = []): string {
+function buildGroupByUrl(
+  dimension: GroupByDimension,
+  assets: string[] = [],
+  order: SortOrder = "desc"
+): string {
   const url = new URL(`${CONVIVA_BASE_URL}/concurrent-plays/group-by/${dimension}`);
   url.searchParams.set("minutes", "5");
   url.searchParams.set("granularity", "PT1M");
   url.searchParams.set("limit", dimension === "asset" ? "500" : "200");
   url.searchParams.set("sort_by", "concurrent-plays");
-  url.searchParams.set("order", "desc");
+  url.searchParams.set("order", order);
 
   for (const asset of assets) {
     url.searchParams.append("asset", asset);
@@ -92,9 +90,10 @@ function buildGroupByUrl(dimension: GroupByDimension, assets: string[] = []): st
 
 async function convivaGroupBy(
   dimension: GroupByDimension,
-  assets: string[] = []
+  assets: string[] = [],
+  order: SortOrder = "desc"
 ): Promise<ConvivaMetricsV3Response> {
-  const res = await fetch(buildGroupByUrl(dimension, assets), {
+  const res = await fetch(buildGroupByUrl(dimension, assets, order), {
     method: "GET",
     headers: {
       Authorization: authHeader(),
@@ -137,8 +136,29 @@ function rowValue(row: ConvivaDimensionalRow): string {
   return row.dimension?.value?.trim() || "Unknown";
 }
 
+function mergeRows(...groups: ConvivaDimensionalRow[][]): ConvivaDimensionalRow[] {
+  const merged = new Map<string, ConvivaDimensionalRow>();
+
+  for (const group of groups) {
+    for (const row of group) {
+      const key = rowValue(row);
+      const current = merged.get(key);
+      if (!current || metricCount(row) > metricCount(current)) merged.set(key, row);
+    }
+  }
+
+  return [...merged.values()];
+}
+
 function percentage(value: number, total: number): number | undefined {
   return total > 0 ? Math.round((value / total) * 1000) / 10 : undefined;
+}
+
+function cleanAssetName(value: string): string {
+  return value
+    .replace(/\s+-\s+s-\d+e-\d+.*$/i, "")
+    .replace(/\s+-\s+mediaid:.*$/i, "")
+    .trim();
 }
 
 function breakdownFromRows(
@@ -187,20 +207,20 @@ function liveVodFromRows(source: ConvivaDimensionalRow[]): { live: number; vod: 
   return { live, vod };
 }
 
-function diagnosticRow(row: ConvivaDimensionalRow): string {
-  try {
-    return JSON.stringify(row);
-  } catch {
-    return "[No se pudo serializar el registro]";
-  }
-}
-
 export async function getConvivaLiveSnapshot(titleQuery: string): Promise<ConvivaLiveSnapshot> {
   const title = titleQuery.trim();
   if (!title) throw new Error("Falta el título para consultar Conviva.");
 
-  const assetResponse = await convivaGroupBy("asset");
-  const assetRows = rows(assetResponse);
+  // Conviva caps group-by results at 500 entities. Reading both ends of the
+  // sorted list gives us coverage of the largest live streams and smaller
+  // related episodes (for example, companion shows/VOD titles) that can fall
+  // outside the top 500 when the account has a lot of active content.
+  const [assetDescResponse, assetAscResponse] = await Promise.all([
+    convivaGroupBy("asset", [], "desc"),
+    convivaGroupBy("asset", [], "asc"),
+  ]);
+
+  const assetRows = mergeRows(rows(assetDescResponse), rows(assetAscResponse));
   const normalizedTitle = normalizeText(title);
   const matchedRows = assetRows.filter((row) =>
     normalizeText(rowValue(row)).includes(normalizedTitle)
@@ -208,16 +228,9 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
 
   const matchedAssets = matchedRows.map(rowValue);
   const concurrentPlays = matchedRows.reduce((sum, row) => sum + metricCount(row), 0);
-  const titles = breakdownFromRows(matchedRows, concurrentPlays, 20);
-  const selected = selectedPointInfo(assetResponse);
+  const titles = breakdownFromRows(matchedRows, concurrentPlays, 20, cleanAssetName);
+  const selected = selectedPointInfo(assetDescResponse);
   const updatedAt = selected.point?.timestamp?.iso_date ?? new Date().toISOString();
-  const diagnostics = {
-    activeAssetCount: assetRows.length,
-    sampleAssets: assetRows.slice(0, 12).map(rowValue),
-    pointCount: assetResponse.time_series?.length ?? 0,
-    selectedPointIndex: selected.index,
-    matchedRowSamples: matchedRows.slice(0, 3).map(diagnosticRow),
-  };
 
   if (!matchedAssets.length) {
     return {
@@ -230,7 +243,6 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
       countries: [],
       devices: [],
       updatedAt,
-      diagnostics,
     };
   }
 
@@ -252,6 +264,5 @@ export async function getConvivaLiveSnapshot(titleQuery: string): Promise<Conviv
     countries: breakdownFromRows(rows(countryResponse), concurrentPlays, 8, countryName),
     devices: breakdownFromRows(rows(deviceResponse), concurrentPlays, 8),
     updatedAt,
-    diagnostics,
   };
 }
