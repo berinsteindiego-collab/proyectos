@@ -4,12 +4,13 @@ const TERMINAL = new Set(["Done", "Cancelled", "Wont do"]);
 
 function sortTasks(tasks: ProjectTask[]) {
   return [...tasks].sort((a, b) => {
-    const aPending = !TERMINAL.has(a.status);
-    const bPending = !TERMINAL.has(b.status);
-    if (aPending !== bPending) return aPending ? -1 : 1;
+    const aBlocked = a.status === "Blocked";
+    const bBlocked = b.status === "Blocked";
+    if (aBlocked !== bBlocked) return aBlocked ? -1 : 1;
+
     const aDate = a.deadline ?? "9999-99-99";
     const bDate = b.deadline ?? "9999-99-99";
-    return aDate < bDate ? -1 : 1;
+    return aDate.localeCompare(bDate);
   });
 }
 
@@ -21,10 +22,15 @@ function formatOwner(task: ProjectTask): string {
 }
 
 export default function TaskTable({ tasks }: { tasks: ProjectTask[] }) {
-  const sorted = sortTasks(tasks);
+  const pending = tasks.filter((task) => !TERMINAL.has(task.status));
+  const sorted = sortTasks(pending);
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Tareas por completar</p>
+        <p className="mt-0.5 text-xs text-slate-400">Solo se muestran tareas que todavía requieren acción.</p>
+      </div>
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400">
           <tr>
@@ -52,8 +58,9 @@ export default function TaskTable({ tasks }: { tasks: ProjectTask[] }) {
           ))}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">
-                Sin tareas.
+              <td colSpan={4} className="px-4 py-8 text-center">
+                <p className="font-medium text-emerald-700 dark:text-emerald-400">Proyecto completo</p>
+                <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">No quedan tareas pendientes.</p>
               </td>
             </tr>
           )}
