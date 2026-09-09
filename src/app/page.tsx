@@ -1,10 +1,10 @@
 import AskBox from "@/components/AskBox";
-import AttentionPanel from "@/components/AttentionPanel";
+import Panorama from "@/components/Panorama";
 
 export default function HomePage() {
   return (
     <>
-      <AttentionPanel />
+      <Panorama />
       <AskBox />
     </>
   );
