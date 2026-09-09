@@ -16,13 +16,6 @@ function compact(value: number) {
   return new Intl.NumberFormat("es-AR", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-function formatPercentage(value?: number) {
-  if (value == null) return "";
-  if (value > 0 && value < 0.1) return "<0,1%";
-  if (value === 0) return "0%";
-  return `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1 }).format(value)}%`;
-}
-
 function Breakdown({ title, items }: { title: string; items: LiveSnapshotData["countries"] }) {
   if (!items.length) return null;
 
@@ -32,7 +25,7 @@ function Breakdown({ title, items }: { title: string; items: LiveSnapshotData["c
 
       <div className="mt-3 divide-y divide-slate-200/70 dark:divide-slate-800">
         {items.slice(0, 5).map((item) => (
-          <div key={item.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+          <div key={item.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 py-2.5 first:pt-0 last:pb-0">
             <span
               className="min-w-0 text-[13px] leading-5 text-slate-700 dark:text-slate-300"
               title={item.name}
@@ -40,16 +33,9 @@ function Breakdown({ title, items }: { title: string; items: LiveSnapshotData["c
               {item.name}
             </span>
 
-            <div className="flex items-baseline gap-1.5 whitespace-nowrap text-right">
-              <span className="text-[13px] font-semibold tabular-nums text-slate-950 dark:text-white">
-                {compact(item.value)}
-              </span>
-              {item.percentage != null && (
-                <span className="text-[12px] tabular-nums text-slate-400">
-                  {formatPercentage(item.percentage)}
-                </span>
-              )}
-            </div>
+            <span className="whitespace-nowrap text-right text-[13px] font-semibold tabular-nums text-slate-950 dark:text-white">
+              {compact(item.value)}
+            </span>
           </div>
         ))}
       </div>
