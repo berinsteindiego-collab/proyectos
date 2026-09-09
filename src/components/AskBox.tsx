@@ -29,7 +29,7 @@ const LIVE_WORDS = /\b(viewers?|usuarios?|concurrentes?|viendo|audiencia|pa[ií]
 const HISTORY_KEY = "project-control-recent-questions";
 
 function suggestionsFor(m: ChatMessage): string[] {
-  if (m.live) return [`¿De qué países están viendo ${m.live.titleQuery}?`, `¿En qué dispositivos se ve ${m.live.titleQuery}?`];
+  if (m.live) return [`¿De qué países están viendo ${m.live.titleQuery}?`, `¿En qué dispositivos se ve ${m.live.titleQuery}?`, `¿Qué títulos de ${m.live.titleQuery} tienen más audiencia?`];
   if (m.status) {
     const name = m.status.project.name;
     return [`¿Qué falta en ${name}?`, `¿Qué está vencido en ${name}?`, `Próximos deadlines de ${name}`];
@@ -53,12 +53,36 @@ function pickAudioMimeType(): string | undefined {
   return ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"].find((type) => MediaRecorder.isTypeSupported?.(type));
 }
 
-function extractLiveTitle(text: string): string {
+function cleanLiveTitle(text: string): string {
   return text
-    .replace(/[¿?¡!.,]/g, " ")
-    .replace(/\b(cu[aá]ntos?|cu[aá]ntas?|usuarios?|viewers?|concurrentes?|hay|est[aá]n|viendo|ven|de|desde|qu[eé]|pa[ií]ses?|dispositivos?|devices?|en|el|la|los|las|ahora|live|audiencia|principal|m[aá]s)\b/gi, " ")
+    .replace(/[¿?¡!.,;:]+$/g, "")
+    .replace(/\b(ahora|en vivo|live)\s*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function extractLiveTitle(text: string): string {
+  const cleaned = text.replace(/[¿?¡!]/g, " ").replace(/\s+/g, " ").trim();
+  const patterns = [
+    /\b(?:est[aá]n\s+)?viendo\s+(.+)$/i,
+    /\b(?:se\s+)?ve\s+(.+)$/i,
+    /\bver\s+(.+)$/i,
+    /\b(?:audiencia|usuarios?|viewers?|concurrentes?)\b.*?\b(?:de|en)\s+(.+)$/i,
+    /\b(?:pa[ií]ses?|dispositivos?|devices?)\b.*?\b(?:de|en)\s+(.+)$/i,
+    /\bt[ií]tulos?\b.*?\bde\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match?.[1]) return cleanLiveTitle(match[1]);
+  }
+
+  return cleanLiveTitle(
+    cleaned
+      .replace(/\b(cu[aá]ntos?|cu[aá]ntas?|usuarios?|viewers?|concurrentes?|hay|est[aá]n?|viendo|ven|ver|se|ve|qu[eé]|pa[ií]ses?|dispositivos?|devices?|ahora|live|audiencia|principal|m[aá]s|t[ií]tulos?)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 export default function AskBox() {
