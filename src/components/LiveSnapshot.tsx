@@ -10,6 +10,12 @@ export interface LiveSnapshotData {
   countries: Array<{ name: string; value: number; percentage?: number }>;
   devices: Array<{ name: string; value: number; percentage?: number }>;
   updatedAt: string;
+  diagnostics?: {
+    activeAssetCount: number;
+    sampleAssets: string[];
+    pointCount: number;
+    selectedPointIndex: number;
+  };
 }
 
 function compact(value: number) {
@@ -68,8 +74,32 @@ export default function LiveSnapshot({ live }: { live: LiveSnapshotData }) {
           <Breakdown title="Dispositivos" items={live.devices} />
         </div>
       )}
+
       {live.matchedAssets.length === 0 && (
         <p className="mt-4 text-sm text-slate-500">No encontré títulos activos que contengan “{live.titleQuery}”.</p>
+      )}
+
+      {live.diagnostics && (
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+          <p className="font-semibold uppercase tracking-wider">Conviva debug · temporal</p>
+          <div className="mt-2 space-y-1">
+            <p>Assets activos recibidos: <strong>{live.diagnostics.activeAssetCount}</strong></p>
+            <p>Time series points: <strong>{live.diagnostics.pointCount}</strong> · punto usado: <strong>{live.diagnostics.selectedPointIndex}</strong></p>
+            <p>Matches con “{live.titleQuery}”: <strong>{live.matchedAssets.length}</strong></p>
+          </div>
+          <div className="mt-3">
+            <p className="font-medium">Ejemplos de assets recibidos:</p>
+            {live.diagnostics.sampleAssets.length ? (
+              <ul className="mt-1 space-y-1 break-words">
+                {live.diagnostics.sampleAssets.map((asset, index) => (
+                  <li key={`${asset}-${index}`}>• {asset}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1">No llegaron nombres de assets en dimensional_data.</p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
