@@ -16,6 +16,10 @@ function extractProjectQuery(text: string): string {
     /^por\s+qu[eé]\s+(?:est[aá]|figura|aparece)\s+(?:el\s+proyecto\s+)?(?:en\s+)?(?:riesgo|risk)\s+(.+)$/i,
     /^por\s+qu[eé]\s+(.+?)\s+(?:est[aá]|figura|aparece)\s+(?:en\s+)?(?:riesgo|risk)$/i,
     /^(?:por\s+qu[eé]|porque)\s+(?:est[aá]|figura|aparece)\s+(?:en\s+)?(?:riesgo|risk)\s+(.+)$/i,
+    /^(?:qu[eé]|cu[aá]les?)\s+riesgos?\s+tiene\s+(.+)$/i,
+    /^riesgos?\s+(?:de|del|en)\s+(.+)$/i,
+    /^qu[eé]\s+(?:pone|deja)\s+(?:en\s+)?riesgo\s+(.+)$/i,
+    /^cu[aá]l\s+es\s+(?:el\s+)?riesgo\s+(?:de|del|en)\s+(.+)$/i,
   ];
 
   for (const pattern of patterns) {
