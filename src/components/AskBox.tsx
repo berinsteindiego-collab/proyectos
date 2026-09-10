@@ -35,7 +35,8 @@ const EXAMPLES = [
 
 const LIVE_WORDS = /\b(viewers?|usuarios?|concurrentes?|viendo|audiencia|pa[ií]ses?|dispositivos?|devices?|live)\b/i;
 const DAILY_BRIEF = /^(?:dame\s+)?(?:el\s+)?resumen\s+de\s+hoy[.!?¡¿]*$/i;
-const RISK_REASON = /\b(?:por\s+qu[eé]|porque)\b.*\b(?:riesgo|risk)\b|\b(?:riesgo|risk)\b.*\b(?:por\s+qu[eé]|porque)\b/i;
+const RISK_REASON =
+  /\b(?:(?:por\s+qu[eé]|porque)\b.*\b(?:riesgos?|risk)\b|(?:qu[eé]|cu[aá]les?)\s+riesgos?\s+tiene\b|riesgos?\s+(?:de|del|en)\b|qu[eé]\s+(?:pone|deja)\s+(?:en\s+)?riesgo\b|cu[aá]l\s+es\s+(?:el\s+)?riesgo\s+(?:de|del|en)\b|(?:riesgos?|risk)\b.*\b(?:por\s+qu[eé]|porque)\b)/i;
 const HISTORY_KEY = "project-control-recent-questions";
 
 function suggestionsFor(m: ChatMessage): string[] {
