@@ -35,6 +35,7 @@ const EXAMPLES = [
 
 const LIVE_WORDS = /\b(viewers?|usuarios?|concurrentes?|viendo|audiencia|pa[ií]ses?|dispositivos?|devices?|live)\b/i;
 const DAILY_BRIEF = /^(?:dame\s+)?(?:el\s+)?resumen\s+de\s+hoy[.!?¡¿]*$/i;
+const RISK_REASON = /\b(?:por\s+qu[eé]|porque)\b.*\b(?:riesgo|risk)\b|\b(?:riesgo|risk)\b.*\b(?:por\s+qu[eé]|porque)\b/i;
 const HISTORY_KEY = "project-control-recent-questions";
 
 function suggestionsFor(m: ChatMessage): string[] {
@@ -134,6 +135,14 @@ export default function AskBox() {
         const briefBody = await briefRes.json();
         if (!briefRes.ok) throw new Error(briefBody.error ?? "No se pudo generar el resumen de hoy.");
         setMessages([...next, { role: "assistant", content: briefBody.reply, briefActions: briefBody.actions }]);
+        return;
+      }
+
+      if (RISK_REASON.test(text.trim())) {
+        const riskRes = await fetch(`/api/risk-reason?q=${encodeURIComponent(text)}`, { cache: "no-store" });
+        const riskBody = await riskRes.json();
+        if (!riskRes.ok) throw new Error(riskBody.error ?? "No se pudo explicar el riesgo del proyecto.");
+        setMessages([...next, { role: "assistant", content: riskBody.reply, matches: riskBody.matches, list: riskBody.list }]);
         return;
       }
 
