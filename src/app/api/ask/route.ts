@@ -24,12 +24,6 @@ import {
 } from "@/lib/ai/format";
 import { parsePeriod, monthLabel } from "@/lib/ops/period";
 
-// Rule-based question parser for /api/ask, used whenever GROQ_API_KEY isn't
-// configured or the Groq call throws (see src/lib/ai/groq.ts). Airtable is
-// the only source of truth here too: every branch below resolves a project
-// via the same read-only tools the Groq assistant uses, and never invents or
-// recomputes a value Airtable already owns.
-
 const HELP_MESSAGE = `No entendí bien la pregunta. Puedo responder cosas como:
 - "¿Cómo está <proyecto>?"
 - "¿Qué falta en <proyecto>?"
@@ -59,18 +53,9 @@ interface IntentDef {
   patterns: RegExp[];
 }
 
-// Checked in order — project-independent intents and the more specific
-// task-list intents come first, "status" is the broadest catch-all so it's
-// checked last (otherwise it would swallow phrasings meant for the others).
 const INTENT_PATTERNS: IntentDef[] = [
-  {
-    intent: "feeds",
-    patterns: [/\bfeeds?\b/],
-  },
-  {
-    intent: "standalones",
-    patterns: [/\bstandalones?\b/],
-  },
+  { intent: "feeds", patterns: [/\bfeeds?\b/] },
+  { intent: "standalones", patterns: [/\bstandalones?\b/] },
   {
     intent: "at_risk",
     patterns: [/proyectos?\s+(est[aá]n\s+)?en\s+riesgo/, /qu[eé]\s+est[aá]\s+en\s+riesgo/],
@@ -90,11 +75,21 @@ const INTENT_PATTERNS: IntentDef[] = [
   },
   {
     intent: "overdue",
-    patterns: [/qu[eé]\s+est[aá]\s+vencido/, /vencid[oa]s?\s+en/, /atrasad[oa]s?\s+en/],
+    patterns: [
+      /qu[eé]\s+est[aá]\s+vencid[oa]s?/,
+      /qu[eé]\s+hay\s+vencid[oa]s?/,
+      /vencid[oa]s?\s+en/,
+      /atrasad[oa]s?\s+en/,
+    ],
   },
   {
     intent: "blocked",
-    patterns: [/qu[eé]\s+est[aá]\s+bloqueado/, /bloque[ao]d[oa]s?\s+en/, /bloqueos?\s+de/],
+    patterns: [
+      /qu[eé]\s+est[aá]\s+bloquead[oa]s?/,
+      /qu[eé]\s+hay\s+bloquead[oa]s?/,
+      /bloquead[oa]s?\s+en/,
+      /bloqueos?\s+de/,
+    ],
   },
   {
     intent: "pending",
@@ -103,8 +98,6 @@ const INTENT_PATTERNS: IntentDef[] = [
   {
     intent: "status",
     patterns: [
-      // Full-phrase variants first so the matched span swallows filler words
-      // ("en qué", "cuál es el") and leaves a clean project name behind.
       /en\s+qu[eé]\s+estado\s+est[aá]/,
       /en\s+qu[eé]\s+estado\s+se\s+encuentra/,
       /cu[aá]l\s+es\s+el\s+estado\s+de/,
@@ -119,10 +112,6 @@ const INTENT_PATTERNS: IntentDef[] = [
   },
 ];
 
-// Common Spanish question filler words that never appear inside a project
-// name — stripped as a last resort when no intent regex matched, so a
-// phrasing we didn't anticipate still has a chance of resolving to a
-// project instead of falling straight to the help message.
 const QUESTION_STOPWORDS =
   /\b(en|qu[eé]|c[oó]mo|cu[aá]l|cu[aá]les|es|est[aá]|est[aá]n|se|encuentra|de|del|para|el|la|los|las|un|una|hay|tiene|sobre)\b/gi;
 
@@ -141,16 +130,18 @@ function cleanQuery(text: string): string {
     .trim();
 }
 
+function cleanProjectQuery(text: string): string {
+  return cleanQuery(text)
+    .replace(/^(?:en|de|del|para|sobre)\s+/i, "")
+    .replace(/\s+(?:ahora|hoy)$/i, "")
+    .trim();
+}
+
 interface MatchResult {
   intent: Intent;
   projectQuery: string;
 }
 
-/**
- * Finds the first intent whose pattern matches `text`, and returns whatever
- * is left of the sentence after removing the matched phrase — that leftover
- * is what we search Airtable project names against.
- */
 function matchIntent(text: string): MatchResult {
   const cleaned = text.trim();
   for (const { intent, patterns } of INTENT_PATTERNS) {
@@ -158,7 +149,7 @@ function matchIntent(text: string): MatchResult {
       const match = cleaned.match(pattern);
       if (match && match.index != null) {
         const remainder = cleaned.slice(0, match.index) + cleaned.slice(match.index + match[0].length);
-        return { intent, projectQuery: cleanQuery(remainder) };
+        return { intent, projectQuery: cleanProjectQuery(remainder) };
       }
     }
   }
@@ -178,21 +169,21 @@ function formatStatus(status: ProjectStatus): string {
   return parts.join(" ");
 }
 
-
 async function resolveProject(
   projectQuery: string
 ): Promise<{ ok: true; projectName: string } | { ok: false; reply: string; matches?: ProjectSearchResult[] }> {
-  if (!projectQuery) {
+  const cleanedProjectQuery = cleanProjectQuery(projectQuery);
+  if (!cleanedProjectQuery) {
     return { ok: false, reply: "¿De qué proyecto querés saber? Decime el nombre (puede ser parcial)." };
   }
-  const { matches } = await searchProjectsTool(projectQuery);
+  const { matches } = await searchProjectsTool(cleanedProjectQuery);
   if (matches.length === 0) {
-    return { ok: false, reply: `No encontré ningún proyecto que coincida con "${projectQuery}".` };
+    return { ok: false, reply: `No encontré ningún proyecto que coincida con "${cleanedProjectQuery}".` };
   }
   if (matches.length > 1) {
     return {
       ok: false,
-      reply: `Hay más de un proyecto que coincide con "${projectQuery}". ¿Cuál buscabas?`,
+      reply: `Hay más de un proyecto que coincide con "${cleanedProjectQuery}". ¿Cuál buscabas?`,
       matches,
     };
   }
@@ -207,9 +198,7 @@ async function handleRuleBased(text: string): Promise<NextResponse> {
     if (monthIndex !== null && year !== null) {
       const result = await listFeedsActiveInMonthTool(text);
       if (!result.ok) return NextResponse.json({ reply: result.message });
-      if (result.projects.length === 0) {
-        return NextResponse.json({ reply: `No hay feeds activos en ${monthLabel(year, monthIndex)}.` });
-      }
+      if (result.projects.length === 0) return NextResponse.json({ reply: `No hay feeds activos en ${monthLabel(year, monthIndex)}.` });
       return NextResponse.json({
         reply: `Feeds activos en ${monthLabel(year, monthIndex)}:`,
         list: feedsActiveToListPayload(result.projects, `Feeds activos en ${monthLabel(year, monthIndex)}`),
@@ -219,14 +208,11 @@ async function handleRuleBased(text: string): Promise<NextResponse> {
       const result = await getFeedsCapacityTool(year);
       const { peakFeeds, peakMonth } = result.capacity;
       return NextResponse.json({
-        reply: peakMonth
-          ? `El pico de feeds simultáneos en ${year} es ${peakFeeds} (en ${peakMonth}).`
-          : `No encontré datos de feeds para ${year}.`,
+        reply: peakMonth ? `El pico de feeds simultáneos en ${year} es ${peakFeeds} (en ${peakMonth}).` : `No encontré datos de feeds para ${year}.`,
       });
     }
     return NextResponse.json({
-      reply:
-        '¿De qué año o mes querés saber la capacidad de feeds? Ejemplo: "pico de feeds en 2026" o "feeds activos en octubre 2026".',
+      reply: '¿De qué año o mes querés saber la capacidad de feeds? Ejemplo: "pico de feeds en 2026" o "feeds activos en octubre 2026".',
     });
   }
 
@@ -235,79 +221,51 @@ async function handleRuleBased(text: string): Promise<NextResponse> {
     if (monthIndex !== null && year !== null) {
       const result = await listStandalonesActiveInMonthTool(text);
       if (!result.ok) return NextResponse.json({ reply: result.message });
-      if (result.events.length === 0) {
-        return NextResponse.json({ reply: `No hay standalones activos en ${monthLabel(year, monthIndex)}.` });
-      }
+      if (result.events.length === 0) return NextResponse.json({ reply: `No hay standalones activos en ${monthLabel(year, monthIndex)}.` });
       return NextResponse.json({
         reply: `Standalones activos en ${monthLabel(year, monthIndex)}:`,
-        list: standalonesActiveToListPayload(
-          result.events,
-          `Standalones activos en ${monthLabel(year, monthIndex)}`
-        ),
+        list: standalonesActiveToListPayload(result.events, `Standalones activos en ${monthLabel(year, monthIndex)}`),
       });
     }
     if (year !== null) {
       const result = await getStandalonesTotalsByYearTool(year);
-      return NextResponse.json({
-        reply: `En ${year} hay ${result.totals.totalEvents} eventos standalone en total, de ${result.totals.distinctShows} shows/proyectos distintos.`,
-      });
+      return NextResponse.json({ reply: `En ${year} hay ${result.totals.totalEvents} eventos standalone en total, de ${result.totals.distinctShows} shows/proyectos distintos.` });
     }
     return NextResponse.json({
-      reply:
-        '¿De qué año o mes querés saber los standalones? Ejemplo: "standalones en 2026" o "standalones activos en junio 2026".',
+      reply: '¿De qué año o mes querés saber los standalones? Ejemplo: "standalones en 2026" o "standalones activos en junio 2026".',
     });
   }
 
   if (intent === "at_risk") {
     const { projects } = await listProjectsAtRiskTool();
-    if (projects.length === 0) {
-      return NextResponse.json({ reply: "No hay proyectos marcados en riesgo en este momento." });
-    }
-    return NextResponse.json({
-      reply: `${projects.length} proyecto${projects.length === 1 ? "" : "s"} en riesgo:`,
-      list: atRiskToListPayload(projects),
-    });
+    if (projects.length === 0) return NextResponse.json({ reply: "No hay proyectos marcados en riesgo en este momento." });
+    return NextResponse.json({ reply: `${projects.length} proyecto${projects.length === 1 ? "" : "s"} en riesgo:`, list: atRiskToListPayload(projects) });
   }
 
   if (intent === "upcoming") {
     const { projects } = await listUpcomingProjectsTool();
-    if (projects.length === 0) {
-      return NextResponse.json({ reply: "No encontré proyectos próximos a lanzar." });
-    }
+    if (projects.length === 0) return NextResponse.json({ reply: "No encontré proyectos próximos a lanzar." });
     return NextResponse.json({ reply: "Próximos en iniciar:", list: upcomingToListPayload(projects) });
   }
 
   if (intent === "unknown") {
     const trimmed = cleanQuery(text);
     let { matches } = await searchProjectsTool(trimmed);
-    // The raw sentence rarely matches a short project name directly (it
-    // checks whether the name *contains* the query). Retry with question
-    // filler words stripped before giving up — this is what lets
-    // unanticipated phrasings like "en qué estado está X" still resolve.
     if (matches.length === 0) {
       const stripped = stripQuestionWords(trimmed);
-      if (stripped && stripped !== trimmed) {
-        matches = (await searchProjectsTool(stripped)).matches;
-      }
+      if (stripped && stripped !== trimmed) matches = (await searchProjectsTool(stripped)).matches;
     }
     if (matches.length === 1) {
       const result = await getProjectStatusTool(matches[0].name);
-      if (result.ok) {
-        return NextResponse.json({ reply: formatStatus(result.status), status: result.status });
-      }
+      if (result.ok) return NextResponse.json({ reply: formatStatus(result.status), status: result.status });
     } else if (matches.length > 1) {
-      return NextResponse.json({
-        reply: `Hay más de un proyecto que coincide con "${trimmed}". ¿Cuál buscabas?`,
-        matches,
-      });
+      return NextResponse.json({ reply: `Hay más de un proyecto que coincide con "${trimmed}". ¿Cuál buscabas?`, matches });
     }
     return NextResponse.json({ reply: HELP_MESSAGE });
   }
 
   const resolved = await resolveProject(projectQuery);
-  if (!resolved.ok) {
-    return NextResponse.json({ reply: resolved.reply, matches: resolved.matches });
-  }
+  if (!resolved.ok) return NextResponse.json({ reply: resolved.reply, matches: resolved.matches });
   const projectName = resolved.projectName;
 
   switch (intent) {
@@ -319,46 +277,26 @@ async function handleRuleBased(text: string): Promise<NextResponse> {
     case "pending": {
       const result = await getPendingTasksTool(projectName);
       if (!result.ok) return NextResponse.json({ reply: result.message });
-      if (result.tasks.length === 0) {
-        return NextResponse.json({ reply: `No hay tareas pendientes en ${projectName}.` });
-      }
-      return NextResponse.json({
-        reply: `Tareas pendientes en ${projectName}:`,
-        list: tasksToListPayload(result.tasks, `Pendientes en ${projectName}`),
-      });
+      if (result.tasks.length === 0) return NextResponse.json({ reply: `No hay tareas pendientes en ${projectName}.` });
+      return NextResponse.json({ reply: `Tareas pendientes en ${projectName}:`, list: tasksToListPayload(result.tasks, `Pendientes en ${projectName}`) });
     }
     case "blocked": {
       const result = await getBlockedTasksTool(projectName);
       if (!result.ok) return NextResponse.json({ reply: result.message });
-      if (result.tasks.length === 0) {
-        return NextResponse.json({ reply: `No hay tareas bloqueadas en ${projectName}.` });
-      }
-      return NextResponse.json({
-        reply: `Tareas bloqueadas en ${projectName}:`,
-        list: tasksToListPayload(result.tasks, `Bloqueadas en ${projectName}`),
-      });
+      if (result.tasks.length === 0) return NextResponse.json({ reply: `No hay tareas bloqueadas en ${projectName}.` });
+      return NextResponse.json({ reply: `Tareas bloqueadas en ${projectName}:`, list: tasksToListPayload(result.tasks, `Bloqueadas en ${projectName}`) });
     }
     case "overdue": {
       const result = await getOverdueTasksTool(projectName);
       if (!result.ok) return NextResponse.json({ reply: result.message });
-      if (result.tasks.length === 0) {
-        return NextResponse.json({ reply: `No hay tareas vencidas en ${projectName}.` });
-      }
-      return NextResponse.json({
-        reply: `Tareas vencidas en ${projectName}:`,
-        list: tasksToListPayload(result.tasks, `Vencidas en ${projectName}`),
-      });
+      if (result.tasks.length === 0) return NextResponse.json({ reply: `No hay tareas vencidas en ${projectName}.` });
+      return NextResponse.json({ reply: `Tareas vencidas en ${projectName}:`, list: tasksToListPayload(result.tasks, `Vencidas en ${projectName}`) });
     }
     case "deadlines": {
       const result = await getProjectDeadlinesTool(projectName);
       if (!result.ok) return NextResponse.json({ reply: result.message });
-      if (result.tasks.length === 0) {
-        return NextResponse.json({ reply: `No hay deadlines pendientes en ${projectName}.` });
-      }
-      return NextResponse.json({
-        reply: `Próximos deadlines en ${projectName}:`,
-        list: tasksToListPayload(result.tasks, `Deadlines en ${projectName}`),
-      });
+      if (result.tasks.length === 0) return NextResponse.json({ reply: `No hay deadlines pendientes en ${projectName}.` });
+      return NextResponse.json({ reply: `Próximos deadlines en ${projectName}:`, list: tasksToListPayload(result.tasks, `Deadlines en ${projectName}`) });
     }
     default:
       return NextResponse.json({ reply: HELP_MESSAGE });
@@ -379,21 +317,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Falta el mensaje del usuario." }, { status: 400 });
   }
 
-  if (process.env.GROQ_API_KEY) {
-    try {
-      const result = await runGroqChat(history);
-      return NextResponse.json(result);
-    } catch (err) {
-      // Falls through to the rule-based parser below — Groq being
-      // unavailable/misconfigured should never break the assistant.
-      console.error("Groq chat falló, usando el parser basado en reglas:", err);
-    }
-  }
-
   try {
+    // Known operational intents are deterministic: parse the project name
+    // locally and query Airtable directly. This prevents the LLM from sending
+    // fragments such as "Qué está Tennis TV" as the project name.
+    if (matchIntent(current.content).intent !== "unknown") {
+      return await handleRuleBased(current.content);
+    }
+
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const result = await runGroqChat(history);
+        return NextResponse.json(result);
+      } catch (err) {
+        console.error("Groq chat falló, usando el parser basado en reglas:", err);
+      }
+    }
+
     return await handleRuleBased(current.content);
   } catch (err) {
-    console.error("Error en el parser basado en reglas:", err);
+    console.error("Error procesando la pregunta:", err);
     return NextResponse.json({ error: "Ocurrió un error procesando la pregunta." }, { status: 500 });
   }
 }
