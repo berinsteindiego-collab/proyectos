@@ -23,6 +23,7 @@ interface ChatMessage {
   list?: ListPayload;
   live?: LiveSnapshotData;
   briefActions?: BriefAction[];
+  projectName?: string;
 }
 
 const EXAMPLES = [
@@ -37,6 +38,8 @@ const LIVE_WORDS = /\b(viewers?|usuarios?|concurrentes?|viendo|audiencia|pa[ií]
 const DAILY_BRIEF = /^(?:dame\s+)?(?:el\s+)?resumen\s+de\s+hoy[.!?¡¿]*$/i;
 const RISK_REASON =
   /\b(?:(?:por\s+qu[eé]|porque)\b.*\b(?:riesgos?|risk)\b|(?:qu[eé]|cu[aá]les?)\s+riesgos?\s+tiene\b|riesgos?\s+(?:de|del|en)\b|qu[eé]\s+(?:pone|deja)\s+(?:en\s+)?riesgo\b|cu[aá]l\s+es\s+(?:el\s+)?riesgo\s+(?:de|del|en)\b|(?:riesgos?|risk)\b.*\b(?:por\s+qu[eé]|porque)\b)/i;
+const PROJECT_FOLLOW_UP =
+  /^(?:qu[eé]\s+falta|qu[eé]\s+queda|qu[eé]\s+est[aá]\s+pendiente|qu[eé]\s+est[aá]\s+vencido|qu[eé]\s+venci[oó]|qu[eé]\s+est[aá]\s+bloqueado|qu[eé]\s+bloquea|pr[oó]ximos?\s+deadlines?|cu[aá]les?\s+son\s+(?:esas?|las?)\s+tareas?|qu[eé]\s+tareas?\s+son|mostr[aá]melas?|mostrame(?:\s+(?:esas?|las?)\s+tareas?)?|qui[eé]n(?:es)?\s+(?:es|son)\s+(?:el|los|la|las)?\s*responsables?|cu[aá]ndo\s+vencieron|qu[eé]\s+falta\s+hacer)[.!?¡¿]*$/i;
 const HISTORY_KEY = "project-control-recent-questions";
 
 function suggestionsFor(m: ChatMessage): string[] {
@@ -94,6 +97,7 @@ export default function AskBox() {
   const [micSupported, setMicSupported] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [activeProject, setActiveProject] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -124,10 +128,25 @@ export default function AskBox() {
     ]);
   }
 
+  function contextualizeProjectFollowUp(text: string): string {
+    if (!activeProject || !PROJECT_FOLLOW_UP.test(text.trim())) return text;
+
+    const normalized = text.trim().replace(/[¿?¡!.,;:]+/g, "").toLowerCase();
+
+    if (/vencid|venci[oó]/i.test(normalized)) return `¿Qué está vencido en ${activeProject}?`;
+    if (/bloque/i.test(normalized)) return `¿Qué está bloqueado en ${activeProject}?`;
+    if (/deadline/i.test(normalized)) return `Próximos deadlines de ${activeProject}`;
+    if (/responsable/i.test(normalized)) return `¿Qué falta en ${activeProject}?`;
+    if (/tareas?|mostr[aá]melas?|falta|queda|pendiente/i.test(normalized)) return `¿Qué falta en ${activeProject}?`;
+
+    return text;
+  }
+
   async function sendText(text: string) {
     if (!text || loading) return;
     remember(text);
     const next = [...messages, { role: "user" as const, content: text }];
+    const routedText = contextualizeProjectFollowUp(text);
     setMessages(next); setInput(""); setLoading(true); setError(null);
 
     try {
@@ -139,16 +158,17 @@ export default function AskBox() {
         return;
       }
 
-      if (RISK_REASON.test(text.trim())) {
-        const riskRes = await fetch(`/api/risk-reason?q=${encodeURIComponent(text)}`, { cache: "no-store" });
+      if (RISK_REASON.test(routedText.trim())) {
+        const riskRes = await fetch(`/api/risk-reason?q=${encodeURIComponent(routedText)}`, { cache: "no-store" });
         const riskBody = await riskRes.json();
         if (!riskRes.ok) throw new Error(riskBody.error ?? "No se pudo explicar el riesgo del proyecto.");
-        setMessages([...next, { role: "assistant", content: riskBody.reply, matches: riskBody.matches, list: riskBody.list }]);
+        if (riskBody.projectName) setActiveProject(riskBody.projectName);
+        setMessages([...next, { role: "assistant", content: riskBody.reply, matches: riskBody.matches, list: riskBody.list, projectName: riskBody.projectName }]);
         return;
       }
 
-      if (LIVE_WORDS.test(text)) {
-        const title = extractLiveTitle(text);
+      if (LIVE_WORDS.test(routedText)) {
+        const title = extractLiveTitle(routedText);
         if (title) {
           const liveRes = await fetch(`/api/live?title=${encodeURIComponent(title)}`);
           const liveBody = await liveRes.json();
@@ -163,11 +183,17 @@ export default function AskBox() {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next.map((m) => ({ role: m.role, content: m.content })) }),
+        body: JSON.stringify({
+          messages: next.map((m, index) => ({
+            role: m.role,
+            content: index === next.length - 1 && m.role === "user" ? routedText : m.content,
+          })),
+        }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Error desconocido");
-      setMessages([...next, { role: "assistant", content: body.reply, matches: body.matches, status: body.status, list: body.list }]);
+      if (body.status?.project?.name) setActiveProject(body.status.project.name);
+      setMessages([...next, { role: "assistant", content: body.reply, matches: body.matches, status: body.status, list: body.list, projectName: body.status?.project?.name }]);
     } catch (err) { setError((err as Error).message); }
     finally { setLoading(false); }
   }
