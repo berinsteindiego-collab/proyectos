@@ -41,7 +41,7 @@ const DAILY_BRIEF = /^(?:dame\s+)?(?:el\s+)?resumen\s+de\s+hoy[.!?¡¿]*$/i;
 const RISK_REASON =
   /\b(?:(?:por\s+qu[eé]|porque)\b.*\b(?:riesgos?|risk)\b|(?:qu[eé]|cu[aá]les?)\s+riesgos?\s+tiene\b|riesgos?\s+(?:de|del|en)\b|qu[eé]\s+(?:pone|deja)\s+(?:en\s+)?riesgo\b|cu[aá]l\s+es\s+(?:el\s+)?riesgo\s+(?:de|del|en)\b|(?:riesgos?|risk)\b.*\b(?:por\s+qu[eé]|porque)\b)/i;
 const PROJECT_FOLLOW_UP =
-  /^(?:qu[eé]\s+falta|qu[eé]\s+queda|qu[eé]\s+est[aá]\s+pendiente|qu[eé]\s+est[aá]\s+vencido|qu[eé]\s+venci[oó]|qu[eé]\s+est[aá]\s+bloqueado|qu[eé]\s+bloquea|pr[oó]ximos?\s+deadlines?|cu[aá]les?\s+son\s+(?:esas?|las?)\s+tareas?|qu[eé]\s+tareas?\s+son|mostr[aá]melas?|mostrame(?:\s+(?:esas?|las?)\s+tareas?)?|qui[eé]n(?:es)?\s+(?:es|son)\s+(?:el|los|la|las)?\s*responsables?|cu[aá]ndo\s+vencieron|qu[eé]\s+falta\s+hacer)[.!?¡¿]*$/i;
+  /^(?:qu[eé]\s+falta|qu[eé]\s+queda|qu[eé]\s+est[aá]\s+pendiente|qu[eé]\s+est[aá]\s+vencido|qu[eé]\s+venci[oó]|qu[eé]\s+est[aá]\s+bloqueado|qu[eé]\s+bloquea|pr[oó]ximos?\s+deadlines?|cu[aá]les?\s+son\s+(?:esas?|las?)\s+tareas?|qu[eé]\s+tareas?\s+son|mostr[aá]melas?|mostrame(?:\s+(?:esas?|las?)\s+tareas?)?|qui[eé]n(?:es)?\s+(?:es|son)\s+(?:el|los|la|las)?\s*responsables?|cu[aá]ndo\s+vencieron|qu[eé]\s+falta\s+hacer|cu[aá]les?\s+son\s+(?:los\s+)?riesgos?|qu[eé]\s+riesgos?\s+tiene|qu[eé]\s+riesgo\s+tiene|por\s+qu[eé]\s+est[aá]\s+en\s+riesgo)[.!?¡¿]*$/i;
 const HISTORY_KEY = "project-control-recent-questions";
 
 function suggestionsFor(m: ChatMessage): string[] {
@@ -135,6 +135,7 @@ export default function AskBox() {
 
     const normalized = text.trim().replace(/[¿?¡!.,;:]+/g, "").toLowerCase();
 
+    if (/riesgo/i.test(normalized)) return `¿Qué riesgos tiene ${activeProject}?`;
     if (/vencid|venci[oó]/i.test(normalized)) return `¿Qué está vencido en ${activeProject}?`;
     if (/bloque/i.test(normalized)) return `¿Qué está bloqueado en ${activeProject}?`;
     if (/deadline/i.test(normalized)) return `Próximos deadlines de ${activeProject}`;
