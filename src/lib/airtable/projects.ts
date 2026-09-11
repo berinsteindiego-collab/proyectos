@@ -1,5 +1,5 @@
 import { listRecords, isMockMode, type AirtableRecord } from "./client";
-import { EVENT_FIELDS, EVENTOS_TABLE } from "./fields";
+import { EVENT_FIELDS, EVENTOS_TABLE, TAREAS_TABLE } from "./fields";
 import { getTasksForEvent } from "./tasks";
 import { normalizeProject, toReadinessPercent } from "../project-status/normalize";
 import { searchMockProjects, findMockProjectById, listMockUpcoming } from "./mock-data";
@@ -194,30 +194,49 @@ export async function listPortfolioStatusByCategory(categoryQuery: string): Prom
   if (isMockMode()) return [];
 
   const categoryNeedle = normalize(categoryQuery);
-  const records = await listRecords(EVENTOS_TABLE);
+
+  // Portfolio views need data from many projects at once. Fetch the two Airtable
+  // tables once and join them locally via Eventos.Tareas linked-record IDs.
+  // This avoids N x task-record API requests, Airtable 429s and Netlify timeouts.
+  const [records, allTasks] = await Promise.all([
+    listRecords(EVENTOS_TABLE),
+    listRecords(TAREAS_TABLE),
+  ]);
+
   const matching = records.filter((record) => {
     const category = normalize(String(record.fields[EVENT_FIELDS.category] ?? ""));
     return category.includes(categoryNeedle);
   });
 
-  // Fetch each event's linked tasks sequentially. Airtable rate-limits requests per
-  // base, so firing every project at once with Promise.all can trigger HTTP 429.
-  const rows: PortfolioStatusRow[] = [];
-  for (const event of matching) {
-    const project = normalizeProject(event, await getTasksForEvent(event));
+  const tasksById = new Map(allTasks.map((task) => [task.id, task]));
+
+  const rows: PortfolioStatusRow[] = matching.map((event) => {
+    const linkedTaskIds =
+      (event.fields[EVENT_FIELDS.tasks] as string[] | undefined) ?? [];
+    const eventTasks = linkedTaskIds
+      .map((id) => tasksById.get(id))
+      .filter((task): task is AirtableRecord => Boolean(task));
+
+    const project = normalizeProject(event, eventTasks);
     const taskStatus = (matcher: (name: string) => boolean) =>
       project.tasks.find((task) => matcher(normalize(task.name)))?.status ?? null;
 
-    rows.push({
+    return {
       id: project.project.id,
       name: project.project.name,
       startDate: project.project.startDate ?? null,
       status: project.project.status,
-      testDssStatus: taskStatus((name) => name.includes("dss") && name.includes("senal") && name.includes("test")),
-      epgStatus: taskStatus((name) => name === "estado epg" || (name.includes("epg") && name.includes("estado"))),
-      territoryStatus: taskStatus((name) => name === "territory" || name.includes("territory")),
-    });
-  }
+      testDssStatus: taskStatus(
+        (name) => name.includes("dss") && name.includes("senal") && name.includes("test")
+      ),
+      epgStatus: taskStatus(
+        (name) => name === "estado epg" || (name.includes("epg") && name.includes("estado"))
+      ),
+      territoryStatus: taskStatus(
+        (name) => name === "territory" || name.includes("territory")
+      ),
+    };
+  });
 
   const statusRank = (status?: string) => {
     const value = normalize(status ?? "");
