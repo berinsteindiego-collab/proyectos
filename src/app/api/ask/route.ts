@@ -59,7 +59,8 @@ const INTENT_PATTERNS: IntentDef[] = [
   {
     intent: "portfolio_status",
     patterns: [
-      /(?:status|estado)\s+(?:de|del|de los|de las)\s+(realit(?:y|ies)|festivales?|canales?)/i,
+      /(?:status|estado)\s+(?:(?:de|del|de los|de las)\s+)?(realit(?:y|ies)|festivales?|canales?)/i,
+      /(?:status|estado)\s+general/i,
       /c[oó]mo\s+(?:vienen|est[aá]n)\s+(?:los|las)?\s*(realit(?:y|ies)|festivales?|canales?)/i,
     ],
   },
@@ -204,14 +205,30 @@ async function handleRuleBased(text: string): Promise<NextResponse> {
 
   if (intent === "portfolio_status") {
     const normalized = cleanQuery(text).toLowerCase();
-    const category = /festival/.test(normalized) ? "Festival" : /canal/.test(normalized) ? "Canal" : "Reality";
+    const category = /festival/.test(normalized)
+      ? "Festival"
+      : /canal/.test(normalized)
+        ? "Canal"
+        : /realit/.test(normalized)
+          ? "Reality"
+          : "";
+
     const result = await listPortfolioStatusTool(category);
+    const label = category === "Reality"
+      ? "realities"
+      : category === "Festival"
+        ? "festivales"
+        : category === "Canal"
+          ? "canales"
+          : "proyectos";
+
     if (result.projects.length === 0) {
-      return NextResponse.json({ reply: `No encontré ${category === "Reality" ? "realities" : category === "Festival" ? "festivales" : "canales"} pendientes en este momento.` });
+      return NextResponse.json({ reply: `No encontré ${label} pendientes en este momento.` });
     }
+
     return NextResponse.json({
-      reply: `Estado general de ${category === "Reality" ? "realities" : category === "Festival" ? "festivales" : "canales"}:`,
-      portfolioStatus: { category, projects: result.projects },
+      reply: category ? `Estado general de ${label}:` : "Estado general de proyectos:",
+      portfolioStatus: { category: category || "General", projects: result.projects },
     });
   }
 
