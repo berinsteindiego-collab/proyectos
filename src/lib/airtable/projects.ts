@@ -200,23 +200,24 @@ export async function listPortfolioStatusByCategory(categoryQuery: string): Prom
     return category.includes(categoryNeedle);
   });
 
-  const rows = await Promise.all(
-    matching.map(async (event) => {
-      const project = normalizeProject(event, await getTasksForEvent(event));
-      const taskStatus = (matcher: (name: string) => boolean) =>
-        project.tasks.find((task) => matcher(normalize(task.name)))?.status ?? null;
+  // Fetch each event's linked tasks sequentially. Airtable rate-limits requests per
+  // base, so firing every project at once with Promise.all can trigger HTTP 429.
+  const rows: PortfolioStatusRow[] = [];
+  for (const event of matching) {
+    const project = normalizeProject(event, await getTasksForEvent(event));
+    const taskStatus = (matcher: (name: string) => boolean) =>
+      project.tasks.find((task) => matcher(normalize(task.name)))?.status ?? null;
 
-      return {
-        id: project.project.id,
-        name: project.project.name,
-        startDate: project.project.startDate ?? null,
-        status: project.project.status,
-        testDssStatus: taskStatus((name) => name.includes("dss") && name.includes("senal") && name.includes("test")),
-        epgStatus: taskStatus((name) => name === "estado epg" || (name.includes("epg") && name.includes("estado"))),
-        territoryStatus: taskStatus((name) => name === "territory" || name.includes("territory")),
-      } satisfies PortfolioStatusRow;
-    })
-  );
+    rows.push({
+      id: project.project.id,
+      name: project.project.name,
+      startDate: project.project.startDate ?? null,
+      status: project.project.status,
+      testDssStatus: taskStatus((name) => name.includes("dss") && name.includes("senal") && name.includes("test")),
+      epgStatus: taskStatus((name) => name === "estado epg" || (name.includes("epg") && name.includes("estado"))),
+      territoryStatus: taskStatus((name) => name === "territory" || name.includes("territory")),
+    });
+  }
 
   const statusRank = (status?: string) => {
     const value = normalize(status ?? "");
