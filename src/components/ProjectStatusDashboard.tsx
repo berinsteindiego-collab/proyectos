@@ -1,101 +1,74 @@
 import type { ProjectStatus, ProjectTask } from "@/lib/project-status/types";
 
-// Mini "status of project X" dashboard, per the mockup Diego approved:
-// a donut chart of task-status breakdown + upcoming deadlines + overdue/
-// blocked list. Built entirely from fields Airtable already provides
-// (task status, deadline, isBlocker) — no time-tracking data involved.
-const BUCKET_ORDER = ["Hechas", "En curso", "Bloqueadas", "Sin iniciar", "Otras"] as const;
-type Bucket = (typeof BUCKET_ORDER)[number];
+const TERMINAL_STATUSES = new Set(["Done", "Cancelled", "Wont do"]);
 
-const BUCKET_COLORS: Record<Bucket, string> = {
-  Hechas: "#16a34a",
-  "En curso": "#2563eb",
-  Bloqueadas: "#e11d48",
-  "Sin iniciar": "#94a3b8",
-  Otras: "#cbd5e1",
-};
-
-const TERMINAL_DONE = new Set(["Done"]);
-const IGNORED = new Set(["Cancelled", "Wont do"]);
-
-function bucketFor(task: ProjectTask): Bucket {
-  if (task.status === "Blocked" || task.isBlocker) return "Bloqueadas";
-  if (TERMINAL_DONE.has(task.status)) return "Hechas";
-  if (task.status === "In Progress" || task.status === "Waiting") return "En curso";
-  if (task.status === "Not Started") return "Sin iniciar";
-  return "Otras";
-}
-
-function buildBreakdown(tasks: ProjectTask[]): { counts: Partial<Record<Bucket, number>>; total: number } {
-  const counts: Partial<Record<Bucket, number>> = {};
-  let total = 0;
-  for (const t of tasks) {
-    if (IGNORED.has(t.status)) continue;
-    const b = bucketFor(t);
-    counts[b] = (counts[b] ?? 0) + 1;
-    total += 1;
-  }
-  return { counts, total };
-}
-
-function conicGradient(counts: Partial<Record<Bucket, number>>, total: number): string {
-  if (total === 0) return "conic-gradient(#e2e8f0 0deg 360deg)";
-  let acc = 0;
-  const stops: string[] = [];
-  for (const key of BUCKET_ORDER) {
-    const n = counts[key] ?? 0;
-    if (n === 0) continue;
-    const start = (acc / total) * 360;
-    acc += n;
-    const end = (acc / total) * 360;
-    stops.push(`${BUCKET_COLORS[key]} ${start}deg ${end}deg`);
-  }
-  return `conic-gradient(${stops.join(", ")})`;
+function isActionable(task: ProjectTask): boolean {
+  return !TERMINAL_STATUSES.has(task.status);
 }
 
 export default function ProjectStatusDashboard({ status }: { status: ProjectStatus }) {
-  const { counts, total } = buildBreakdown(status.tasks);
-  const gradient = conicGradient(counts, total);
   const readiness = status.project.readiness;
   const today = new Date().toISOString().slice(0, 10);
+  const isReady = readiness === 100 || status.project.status?.includes("Ready");
 
-  const deadlines = status.tasks
-    .filter((t) => !!t.deadline && !IGNORED.has(t.status) && t.status !== "Done")
+  const actionable = status.tasks.filter(isActionable);
+
+  const deadlines = actionable
+    .filter((t) => !!t.deadline && t.deadline! >= today)
     .sort((a, b) => (a.deadline! < b.deadline! ? -1 : 1))
     .slice(0, 4);
 
-  const alerts = status.tasks
+  const alerts = actionable
     .filter(
       (t) =>
-        !IGNORED.has(t.status) &&
-        t.status !== "Done" &&
-        (t.isBlocker || t.status === "Blocked" || (!!t.deadline && t.deadline < today))
+        t.openBlocker === true ||
+        t.overdueBlocker === true ||
+        t.status === "Blocked" ||
+        (!!t.deadline && t.deadline < today)
     )
+    .sort((a, b) => {
+      if (a.overdueBlocker && !b.overdueBlocker) return -1;
+      if (!a.overdueBlocker && b.overdueBlocker) return 1;
+      if (a.deadline && b.deadline) return a.deadline < b.deadline ? -1 : 1;
+      return 0;
+    })
     .slice(0, 4);
+
+  if (isReady && actionable.length === 0) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-lg text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+            ✓
+          </div>
+          <div>
+            <h3 className="font-semibold text-slate-900 dark:text-slate-100">Proyecto listo</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              No quedan tareas pendientes, deadlines próximos ni bloqueos abiertos.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:grid-cols-2">
-      <div className="flex flex-col items-center justify-center">
-        <div className="relative flex h-36 w-36 items-center justify-center rounded-full" style={{ backgroundImage: gradient }}>
-          <div className="flex h-24 w-24 items-center justify-center rounded-full bg-white dark:bg-slate-900">
-            <div className="text-center">
-              <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                {readiness != null ? `${readiness}%` : "—"}
-              </div>
-              <div className="text-[10px] uppercase text-slate-400 dark:text-slate-500">readiness</div>
-            </div>
-          </div>
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          Estado operativo
+        </h3>
+        <div className="mt-3 flex items-baseline gap-2">
+          <span className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
+            {actionable.length}
+          </span>
+          <span className="text-sm text-slate-500 dark:text-slate-400">
+            {actionable.length === 1 ? "tarea requiere acción" : "tareas requieren acción"}
+          </span>
         </div>
-        <div className="mt-4 flex flex-wrap justify-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-          {BUCKET_ORDER.map((key) =>
-            counts[key] ? (
-              <span key={key} className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: BUCKET_COLORS[key] }} />
-                {key} ({counts[key]})
-              </span>
-            ) : null
-          )}
-        </div>
+        <p className="mt-2 text-sm text-slate-400 dark:text-slate-500">
+          Solo se consideran tareas no terminales. Done, Wont do y Cancelled no generan pendientes ni bloqueos.
+        </p>
       </div>
 
       <div className="space-y-4">
@@ -115,6 +88,7 @@ export default function ProjectStatusDashboard({ status }: { status: ProjectStat
             </ul>
           )}
         </div>
+
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-red-500 dark:text-red-400">
             Vencidas / bloqueantes

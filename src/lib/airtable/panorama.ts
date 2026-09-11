@@ -1,54 +1,94 @@
 import { listRecords, isMockMode } from "./client";
-import { EVENTOS_TABLE, EVENT_FIELDS } from "./fields";
+import { EVENTOS_TABLE, EVENT_FIELDS, TAREAS_TABLE, TASK_FIELDS } from "./fields";
 import { listUpcomingProjects } from "./projects";
-import { getStandalonesTotalsByYear } from "./standalones";
-import { getFeedsCapacityByYear } from "./feeds";
 
 export interface PanoramaData {
-  year: number;
   activeProjects: number;
   upcomingProjects: Awaited<ReturnType<typeof listUpcomingProjects>>;
-  standalones: { totalEvents: number; distinctShows: number } | null;
-  feedsPeak: { peakFeeds: number; peakMonth?: string | null } | null;
+  projectsAtRisk: number;
+  openBlockers: number;
+  upcomingDeadlines: number;
 }
 
-const INACTIVE = ["done", "completed", "cancelled", "wont do", "closed", "finalizado", "finalizada"];
+const INACTIVE_PROJECTS = ["done", "completed", "cancelled", "wont do", "closed", "finalizado", "finalizada"];
+const CLOSED_TASKS = ["done", "cancelled", "wont do"];
 
 function looksActive(status?: string): boolean {
   if (!status) return false;
   const value = status.toLowerCase();
-  return !INACTIVE.some((word) => value.includes(word));
+  return !INACTIVE_PROJECTS.some((word) => value.includes(word));
+}
+
+function isAtRisk(status?: string): boolean {
+  if (!status) return false;
+  const value = status.toLowerCase();
+  return value.includes("risk") || value.includes("riesgo");
+}
+
+function taskIsOpen(status?: string): boolean {
+  if (!status) return true;
+  const value = status.toLowerCase();
+  return !CLOSED_TASKS.some((word) => value === word || value.includes(word));
+}
+
+function isWithinNextDays(dateValue: unknown, days: number): boolean {
+  if (typeof dateValue !== "string" || !dateValue) return false;
+  const deadline = new Date(dateValue);
+  if (Number.isNaN(deadline.getTime())) return false;
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(today);
+  end.setDate(end.getDate() + days);
+  end.setHours(23, 59, 59, 999);
+
+  return deadline >= today && deadline <= end;
 }
 
 export async function getPanorama(): Promise<PanoramaData> {
-  const year = new Date().getFullYear();
   const upcomingPromise = listUpcomingProjects(4);
-  const standalonesPromise = getStandalonesTotalsByYear(year).catch(() => null);
-  const feedsPromise = getFeedsCapacityByYear(year).catch(() => null);
 
   if (isMockMode()) {
     const upcomingProjects = await upcomingPromise;
-    return { year, activeProjects: 0, upcomingProjects, standalones: null, feedsPeak: null };
+    return {
+      activeProjects: 0,
+      upcomingProjects,
+      projectsAtRisk: 0,
+      openBlockers: 0,
+      upcomingDeadlines: 0,
+    };
   }
 
-  const [events, upcomingProjects, standalones, feedsPeak] = await Promise.all([
+  const [events, tasks, upcomingProjects] = await Promise.all([
     listRecords(EVENTOS_TABLE),
+    listRecords(TAREAS_TABLE),
     upcomingPromise,
-    standalonesPromise,
-    feedsPromise,
   ]);
 
   const activeProjects = events.filter((event) =>
     looksActive(event.fields[EVENT_FIELDS.status] as string | undefined)
   ).length;
 
+  const projectsAtRisk = events.filter((event) =>
+    isAtRisk(event.fields[EVENT_FIELDS.status] as string | undefined)
+  ).length;
+
+  const openBlockers = tasks.filter((task) => {
+    const status = task.fields[TASK_FIELDS.status] as string | undefined;
+    const blockerValue = task.fields[TASK_FIELDS.openBlocker];
+    return taskIsOpen(status) && (blockerValue === 1 || blockerValue === true);
+  }).length;
+
+  const upcomingDeadlines = tasks.filter((task) => {
+    const status = task.fields[TASK_FIELDS.status] as string | undefined;
+    return taskIsOpen(status) && isWithinNextDays(task.fields[TASK_FIELDS.deadline], 7);
+  }).length;
+
   return {
-    year,
     activeProjects,
     upcomingProjects,
-    standalones: standalones
-      ? { totalEvents: standalones.totalEvents, distinctShows: standalones.distinctShows }
-      : null,
-    feedsPeak: feedsPeak ? { peakFeeds: feedsPeak.peakFeeds, peakMonth: feedsPeak.peakMonth } : null,
+    projectsAtRisk,
+    openBlockers,
+    upcomingDeadlines,
   };
 }

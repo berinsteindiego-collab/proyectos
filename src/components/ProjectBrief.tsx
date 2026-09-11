@@ -47,13 +47,13 @@ export default function ProjectBrief({ status }: { status: ProjectStatus }) {
         <StatusPill status={project.status} />
       </div>
 
-      {summary.totalTasks > 0 && (
+      {project.readiness != null && (
         <div className="mt-5">
           <div className="mb-1.5 flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
-            <span>Avance de tareas</span>
-            <span>{Math.round((summary.completedTasks / summary.totalTasks) * 100)}%</span>
+            <span>Preparación para lanzamiento</span>
+            <span>{project.readiness}%</span>
           </div>
-          <ProgressBar value={(summary.completedTasks / summary.totalTasks) * 100} />
+          <ProgressBar value={project.readiness} />
         </div>
       )}
 
