@@ -12,6 +12,7 @@ import {
   searchProjects,
   listUpcomingProjects,
   listProjectsAtRisk,
+  listPortfolioStatusByCategory,
 } from "../airtable/projects";
 import {
   getFeedsCapacityByYear,
@@ -134,6 +135,11 @@ export async function listUpcomingProjectsTool(limit = 10) {
 export async function listProjectsAtRiskTool(limit = 10) {
   const projects = await listProjectsAtRisk(limit);
   return { ok: true, projects };
+}
+
+export async function listPortfolioStatusTool(category: string) {
+  const projects = await listPortfolioStatusByCategory(category);
+  return { ok: true, category, projects };
 }
 
 // --- Phase 3: Feeds Roll Out / Standalones ---

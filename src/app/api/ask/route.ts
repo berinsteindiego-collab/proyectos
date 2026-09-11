@@ -9,6 +9,7 @@ import {
   searchProjectsTool,
   listUpcomingProjectsTool,
   listProjectsAtRiskTool,
+  listPortfolioStatusTool,
   getFeedsCapacityTool,
   listFeedsActiveInMonthTool,
   getStandalonesTotalsByYearTool,
@@ -37,6 +38,7 @@ const HELP_MESSAGE = `No entendí bien la pregunta. Puedo responder cosas como:
 El nombre del proyecto puede ser parcial (ej. "Telefe" en vez del nombre completo).`;
 
 type Intent =
+  | "portfolio_status"
   | "at_risk"
   | "upcoming"
   | "deadlines"
@@ -54,6 +56,13 @@ interface IntentDef {
 }
 
 const INTENT_PATTERNS: IntentDef[] = [
+  {
+    intent: "portfolio_status",
+    patterns: [
+      /(?:status|estado)\s+(?:de|del|de los|de las)\s+(realit(?:y|ies)|festivales?|canales?)/i,
+      /c[oó]mo\s+(?:vienen|est[aá]n)\s+(?:los|las)?\s*(realit(?:y|ies)|festivales?|canales?)/i,
+    ],
+  },
   { intent: "feeds", patterns: [/\bfeeds?\b/] },
   { intent: "standalones", patterns: [/\bstandalones?\b/] },
   {
@@ -192,6 +201,19 @@ async function resolveProject(
 
 async function handleRuleBased(text: string): Promise<NextResponse> {
   const { intent, projectQuery } = matchIntent(text);
+
+  if (intent === "portfolio_status") {
+    const normalized = cleanQuery(text).toLowerCase();
+    const category = /festival/.test(normalized) ? "Festival" : /canal/.test(normalized) ? "Canal" : "Reality";
+    const result = await listPortfolioStatusTool(category);
+    if (result.projects.length === 0) {
+      return NextResponse.json({ reply: `No encontré ${category === "Reality" ? "realities" : category === "Festival" ? "festivales" : "canales"} pendientes en este momento.` });
+    }
+    return NextResponse.json({
+      reply: `Estado general de ${category === "Reality" ? "realities" : category === "Festival" ? "festivales" : "canales"}:`,
+      portfolioStatus: { category, projects: result.projects },
+    });
+  }
 
   if (intent === "feeds") {
     const { year, monthIndex } = parsePeriod(text);

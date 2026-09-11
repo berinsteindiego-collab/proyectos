@@ -60,6 +60,21 @@ export interface ProjectStatus {
   tasks: ProjectTask[];
 }
 
+export interface PortfolioStatusRow {
+  id: string;
+  name: string;
+  startDate?: string | null;
+  status?: string;
+  testDssStatus?: string | null;
+  epgStatus?: string | null;
+  territoryStatus?: string | null;
+}
+
+export interface PortfolioStatusPayload {
+  category: string;
+  projects: PortfolioStatusRow[];
+}
+
 export class ProjectNotFoundError extends Error {
   constructor(projectName: string) {
     super(`Project "${projectName}" was not found in Airtable (Eventos).`);

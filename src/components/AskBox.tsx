@@ -6,7 +6,8 @@ import ProjectStatusDashboard from "@/components/ProjectStatusDashboard";
 import TaskTable from "@/components/TaskTable";
 import ListCards from "@/components/ListCards";
 import LiveSnapshot, { type LiveSnapshotData } from "@/components/LiveSnapshot";
-import type { ListPayload, ProjectSearchResult, ProjectStatus } from "@/lib/project-status/types";
+import PortfolioStatusTable from "@/components/PortfolioStatusTable";
+import type { ListPayload, PortfolioStatusPayload, ProjectSearchResult, ProjectStatus } from "@/lib/project-status/types";
 
 interface BriefAction {
   label: string;
@@ -22,6 +23,7 @@ interface ChatMessage {
   status?: ProjectStatus;
   list?: ListPayload;
   live?: LiveSnapshotData;
+  portfolioStatus?: PortfolioStatusPayload;
   briefActions?: BriefAction[];
   projectName?: string;
 }
@@ -193,7 +195,7 @@ export default function AskBox() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Error desconocido");
       if (body.status?.project?.name) setActiveProject(body.status.project.name);
-      setMessages([...next, { role: "assistant", content: body.reply, matches: body.matches, status: body.status, list: body.list, projectName: body.status?.project?.name }]);
+      setMessages([...next, { role: "assistant", content: body.reply, matches: body.matches, status: body.status, list: body.list, portfolioStatus: body.portfolioStatus, projectName: body.status?.project?.name }]);
     } catch (err) { setError((err as Error).message); }
     finally { setLoading(false); }
   }
@@ -256,6 +258,7 @@ export default function AskBox() {
                 {m.matches && m.matches.length > 0 && <div className="flex max-w-full flex-wrap gap-2 sm:max-w-[85%]">{m.matches.map((match) => <button key={match.id} onClick={() => sendText(match.name)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{match.name}</button>)}</div>}
                 {m.list && <ListCards list={m.list} />}
                 {m.live && <LiveSnapshot live={m.live} />}
+                {m.portfolioStatus && <PortfolioStatusTable data={m.portfolioStatus} onProjectClick={(name) => sendText(name)} onRiskClick={(name) => sendText(`¿Por qué está en riesgo ${name}?`)} />}
                 {m.status && <div className="max-w-full space-y-4"><ProjectBrief status={m.status} /><ProjectStatusDashboard status={m.status} /><TaskTable tasks={m.status.tasks} /></div>}
                 {i === messages.length - 1 && !loading && <div className="flex max-w-full flex-wrap gap-2 sm:max-w-[85%]">{suggestionsFor(m).map((s) => <button key={s} onClick={() => sendText(s)} className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">{s}</button>)}</div>}
               </>}
