@@ -139,25 +139,28 @@ async function readTitleTreatment(imageUrl) {
 }
 const MARKETS = {
   ARG: {
-    locale: "es-419",
-    profileDir: "disney-qc-poc/auth/profiles/arg",
-    qcRegion: "LATAM",
-    label: "Argentina",
-  },
+  locale: "es-419",
+  webPath: "es-419",
+  profileDir: "disney-qc-poc/auth/profiles/arg",
+  qcRegion: "LATAM",
+  label: "Argentina",
+},
 
-  MX: {
-    locale: "es-419",
-    profileDir: "disney-qc-poc/auth/profiles/mx",
-    qcRegion: "LATAM",
-    label: "México",
-  },
+MX: {
+  locale: "es-419",
+  webPath: "es-419",
+  profileDir: "disney-qc-poc/auth/profiles/mx",
+  qcRegion: "LATAM",
+  label: "México",
+},
 
   BR: {
-    locale: "pt-BR",
-    profileDir: "disney-qc-poc/auth/profiles/br",
-    qcRegion: "BR",
-    label: "Brasil",
-  },
+  locale: "pt-BR",
+  webPath: "pt-br",
+  profileDir: "disney-qc-poc/auth/profiles/br",
+  qcRegion: "BR",
+  label: "Brasil",
+},
 };
 
 
@@ -429,7 +432,7 @@ if (headers["x-application-version"]) {
 // -----------------------------------------
 
 await page.goto(
-  `https://www.disneyplus.com/${marketConfig.locale}/home`,
+  `https://www.disneyplus.com/${marketConfig.webPath}/home`,
   {
     waitUntil: "domcontentloaded",
   }
@@ -522,11 +525,13 @@ console.log(
   `✓ Entity: ${seriesEntity}`
 );
 
+
 await page.goto(
-  `https://www.disneyplus.com/${marketConfig.locale}/browse/entity-${seriesEntity}`,
+  `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
   {
     waitUntil: "domcontentloaded",
   }
+
 );
 // -----------------------------------------
 // Title Treatment
@@ -723,17 +728,21 @@ const popupClosed = await dismissDisneyPopup(page);
 
 if (popupClosed) {
   console.log(
-    "↻ Recargando contenido después del popup..."
+    "↻ Volviendo al contenido después del popup..."
   );
 
-  await page.reload({
+ await page.goto(
+  `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
+  {
     waitUntil: "domcontentloaded",
-  });
+  }
+);
 
   await page.waitForTimeout(3000);
 
   await dismissDisneyPopup(page);
 }
+
 
 function findEpisodeIn(
   value,
@@ -1005,7 +1014,7 @@ console.log(
   );
 
   await page.goto(
-    `https://www.disneyplus.com/${marketConfig.locale}/browse/entity-${seriesEntity}`,
+    `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
     {
       waitUntil: "domcontentloaded",
     }
