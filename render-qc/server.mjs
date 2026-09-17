@@ -117,6 +117,12 @@ const server = http.createServer(async (req, res) => {
 
       browser = await chromium.launch({
         headless: true,
+        // Docker le da al contenedor solo 64MB de /dev/shm por
+        // default. Chrome usa esa memoria compartida para el
+        // compositor de la página, y sin este flag el render puede
+        // quedarse silenciosamente colgado (sin crashear) en vez de
+        // avanzar — encaja con el spinner que nunca progresa.
+        args: ["--disable-dev-shm-usage"],
       });
 
       const context = await browser.newContext({
@@ -214,7 +220,14 @@ const server = http.createServer(async (req, res) => {
         }
       );
 
-      await page.waitForTimeout(6000);
+      // Esperamos en poll hasta 15s en vez de un timeout fijo corto:
+      // el free tier de Render tiene menos CPU que tu PC y el bootstrap
+      // de la SPA de Disney+ puede tardar más en terminar.
+      const deadline1 = Date.now() + 15000;
+
+      while (!disneyApiHeaders && Date.now() < deadline1) {
+        await page.waitForTimeout(500);
+      }
 
       if (!disneyApiHeaders) {
         await page.reload({
@@ -222,7 +235,11 @@ const server = http.createServer(async (req, res) => {
           timeout: 60000,
         });
 
-        await page.waitForTimeout(6000);
+        const deadline2 = Date.now() + 15000;
+
+        while (!disneyApiHeaders && Date.now() < deadline2) {
+          await page.waitForTimeout(500);
+        }
       }
 
       const finalUrl = page.url();
