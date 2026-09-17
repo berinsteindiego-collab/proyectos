@@ -1,0 +1,148 @@
+import { chromium } from "playwright";
+import fs from "node:fs";
+import path from "node:path";
+
+// Toma una sesión ya logueada en el profile persistente local
+// (la misma que usan qc.mjs / test-session.mjs) y la exporta como
+// storageState en base64, lista para pegar como variable de entorno
+// en Render (DISNEY_ARG_STORAGE_STATE / DISNEY_MX_STORAGE_STATE /
+// DISNEY_BR_STORAGE_STATE).
+//
+// Uso:
+//   node disney-qc-poc\scripts\export-render-session.mjs ARG|MX|BR
+
+const market = (process.argv[2] ?? "").toUpperCase();
+
+const MARKETS = {
+  ARG: {
+    locale: "es-419",
+    webPath: "es-419",
+    profileDir: "disney-qc-poc/auth/profiles/arg",
+    secretFile: "disney-arg-storage-state.json",
+  },
+
+  MX: {
+    // Ídem qc-logic.mjs: esta cuenta navega en inglés a propósito
+    // para poder buscar por título en inglés. En inglés (US)
+    // disneyplus.com no lleva segmento de idioma en la URL
+    // ("/home", no "/en/home"), por eso webPath queda vacío.
+    locale: "en-US",
+    webPath: "",
+    profileDir: "disney-qc-poc/auth/profiles/mx",
+    secretFile: "disney-mx-storage-state.json",
+  },
+
+  BR: {
+    // Igual que MX: sin segmento de idioma, dejamos que Disney+
+    // decida solo (ver comentario en render-qc/qc-logic.mjs).
+    locale: "pt-BR",
+    webPath: "",
+    profileDir: "disney-qc-poc/auth/profiles/br",
+    secretFile: "disney-br-storage-state.json",
+  },
+};
+
+const config = MARKETS[market];
+
+if (!config) {
+  console.error("");
+  console.error(
+    "Uso: node disney-qc-poc\\scripts\\export-render-session.mjs ARG|MX|BR"
+  );
+  console.error("");
+  process.exit(1);
+}
+
+const profileDir = path.resolve(config.profileDir);
+
+if (!fs.existsSync(profileDir)) {
+  console.error("");
+  console.error(
+    `✗ No existe ${profileDir}.`
+  );
+  console.error(
+    `  Corré primero: node disney-qc-poc\\scripts\\setup-session.mjs ${market}`
+  );
+  console.error("");
+  process.exit(1);
+}
+
+console.log("");
+console.log(`🔎 Abriendo profile persistente ${market}...`);
+
+const context = await chromium.launchPersistentContext(
+  profileDir,
+  {
+    headless: false,
+    locale: config.locale,
+    viewport: {
+      width: 1440,
+      height: 900,
+    },
+  }
+);
+
+const page = context.pages()[0] ?? (await context.newPage());
+
+const homeUrl = config.webPath
+  ? `https://www.disneyplus.com/${config.webPath}/home`
+  : "https://www.disneyplus.com/home";
+
+await page.goto(homeUrl, {
+  waitUntil: "domcontentloaded",
+});
+
+await page.waitForTimeout(4000);
+
+const url = page.url();
+
+if (/login|identity|welcome/i.test(url)) {
+  console.error("");
+  console.error(
+    `✗ ${market} no está logueado (URL: ${url}).`
+  );
+  console.error(
+    `  Corré: node disney-qc-poc\\scripts\\setup-session.mjs ${market}`
+  );
+  console.error("  y volvé a intentar.");
+  console.error("");
+
+  await context.close();
+  process.exit(1);
+}
+
+console.log(`✓ Sesión ${market} activa, exportando...`);
+
+const storageState = await context.storageState();
+
+await context.close();
+
+const json = JSON.stringify(storageState, null, 2);
+
+const outDir = path.resolve("disney-qc-poc/auth/render-env");
+fs.mkdirSync(outDir, { recursive: true });
+
+const outFile = path.join(outDir, config.secretFile);
+fs.writeFileSync(outFile, json, "utf8");
+
+console.log("");
+console.log(`✓ Guardado en ${outFile}`);
+console.log(`  Tamaño: ${(json.length / 1024).toFixed(1)} KB`);
+console.log("");
+console.log("Próximo paso en Render (Secret Files, NO Environment Variables):");
+console.log(`1. Abrí el servicio "render-qc" → Environment → Secret Files.`);
+console.log(`2. + Add Secret File → Filename: ${config.secretFile}`);
+console.log(`3. En Contents, pegá el contenido íntegro de ese archivo.`);
+console.log(`4. Guardá y esperá el redeploy automático.`);
+console.log("");
+console.log(
+  "Si ya habías cargado DISNEY_" + market + "_STORAGE_STATE como" +
+  " Environment Variable, borrala — es lo que causaba" +
+  " 'argument list too long' en el build."
+);
+console.log("");
+console.log(
+  "Repetí este script cuando la sesión expire (Disney eventualmente" +
+  " la invalida) para volver a generar el archivo y actualizar Render."
+);
+console.log("");
