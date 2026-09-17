@@ -141,22 +141,28 @@ const MARKETS = {
   ARG: {
   locale: "es-419",
   webPath: "es-419",
+  seasonWord: "Temporada",
   profileDir: "disney-qc-poc/auth/profiles/arg",
   qcRegion: "LATAM",
   label: "Argentina",
 },
 
 MX: {
-  locale: "es-419",
-  webPath: "es-419",
+  // A propósito en inglés: buscador de Disney+ por título en inglés.
+  // En inglés (US) disneyplus.com no lleva segmento de idioma en la
+  // URL ("/home", no "/en/home") — por eso webPath queda vacío.
+  locale: "en-US",
+  webPath: "",
+  seasonWord: "Season",
   profileDir: "disney-qc-poc/auth/profiles/mx",
   qcRegion: "LATAM",
-  label: "México",
+  label: "México (búsqueda EN)",
 },
 
   BR: {
   locale: "pt-BR",
   webPath: "pt-br",
+  seasonWord: "Temporada",
   profileDir: "disney-qc-poc/auth/profiles/br",
   qcRegion: "BR",
   label: "Brasil",
@@ -187,6 +193,14 @@ function filterRegionalTracks(tracks, type) {
   return tracks.filter((track) =>
     allowed.includes(track.language)
   );
+}
+
+// Arma URLs de disneyplus.com respetando que el mercado en inglés no
+// lleva segmento de idioma (webPath vacío) mientras que LATAM/BR sí.
+function disneyUrl(webPath, path) {
+  return webPath
+    ? `https://www.disneyplus.com/${webPath}/${path}`
+    : `https://www.disneyplus.com/${path}`;
 }
 
 const searchTitle = process.argv[2];
@@ -432,7 +446,7 @@ if (headers["x-application-version"]) {
 // -----------------------------------------
 
 await page.goto(
-  `https://www.disneyplus.com/${marketConfig.webPath}/home`,
+  disneyUrl(marketConfig.webPath, "home"),
   {
     waitUntil: "domcontentloaded",
   }
@@ -527,7 +541,7 @@ console.log(
 
 
 await page.goto(
-  `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
+  disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
   {
     waitUntil: "domcontentloaded",
   }
@@ -732,7 +746,7 @@ if (popupClosed) {
   );
 
  await page.goto(
-  `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
+  disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
   {
     waitUntil: "domcontentloaded",
   }
@@ -787,10 +801,15 @@ function findEpisodeIn(
 // Obtener Season ID desde Disney+
 // -----------------------------------------
 
+const seasonWordPattern = new RegExp(
+  `${marketConfig.seasonWord}\\s*\\d+`,
+  "i"
+);
+
 const seasonButton = page
   .locator('button[aria-haspopup="listbox"]')
   .filter({
-    hasText: /Temporada\s*\d+/i,
+    hasText: seasonWordPattern,
   })
   .last();
 
@@ -802,7 +821,7 @@ await seasonButton.waitFor({
 await seasonButton.click();
 
 const seasonOption = page.locator(
-  `li[role="option"][title="Temporada ${seasonNumber}"]`
+  `li[role="option"][title="${marketConfig.seasonWord} ${seasonNumber}"]`
 );
 
 await seasonOption.waitFor({
@@ -815,7 +834,7 @@ const seasonId =
 
 if (!seasonId) {
   throw new Error(
-    `Temporada ${seasonNumber} no tiene Season ID.`
+    `${marketConfig.seasonWord} ${seasonNumber} no tiene Season ID.`
   );
 }
 
@@ -1014,7 +1033,7 @@ console.log(
   );
 
   await page.goto(
-    `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
+    disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
     {
       waitUntil: "domcontentloaded",
     }

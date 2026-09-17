@@ -22,8 +22,12 @@ const MARKETS = {
   },
 
   MX: {
-    locale: "es-419",
-    webPath: "es-419",
+    // Ídem qc-logic.mjs: esta cuenta navega en inglés a propósito
+    // para poder buscar por título en inglés. En inglés (US)
+    // disneyplus.com no lleva segmento de idioma en la URL
+    // ("/home", no "/en/home"), por eso webPath queda vacío.
+    locale: "en-US",
+    webPath: "",
     profileDir: "disney-qc-poc/auth/profiles/mx",
     secretFile: "disney-mx-storage-state.json",
   },
@@ -78,12 +82,13 @@ const context = await chromium.launchPersistentContext(
 
 const page = context.pages()[0] ?? (await context.newPage());
 
-await page.goto(
-  `https://www.disneyplus.com/${config.webPath}/home`,
-  {
-    waitUntil: "domcontentloaded",
-  }
-);
+const homeUrl = config.webPath
+  ? `https://www.disneyplus.com/${config.webPath}/home`
+  : "https://www.disneyplus.com/home";
+
+await page.goto(homeUrl, {
+  waitUntil: "domcontentloaded",
+});
 
 await page.waitForTimeout(4000);
 

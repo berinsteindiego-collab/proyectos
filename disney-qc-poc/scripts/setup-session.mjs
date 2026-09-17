@@ -9,18 +9,25 @@ const market =
 const MARKETS = {
   ARG: {
     locale: "es-419",
+    webPath: "es-419",
     profileDir:
       "disney-qc-poc/auth/profiles/arg",
   },
 
   MX: {
-    locale: "es-419",
+    // A propósito en inglés: esta cuenta se usa para buscar títulos
+    // en inglés (ver export-render-session.mjs / qc-logic.mjs).
+    // En inglés (US) disneyplus.com no lleva segmento de idioma en
+    // la URL ("/home", no "/en/home").
+    locale: "en-US",
+    webPath: "",
     profileDir:
       "disney-qc-poc/auth/profiles/mx",
   },
 
   BR: {
     locale: "pt-BR",
+    webPath: "pt-br",
     profileDir:
       "disney-qc-poc/auth/profiles/br",
   },
@@ -75,12 +82,13 @@ const pages = context.pages();
 const page =
   pages[0] ?? await context.newPage();
 
-await page.goto(
-  `https://www.disneyplus.com/${config.locale}/home`,
-  {
-    waitUntil: "domcontentloaded",
-  }
-);
+const homeUrl = config.webPath
+  ? `https://www.disneyplus.com/${config.webPath}/home`
+  : "https://www.disneyplus.com/home";
+
+await page.goto(homeUrl, {
+  waitUntil: "domcontentloaded",
+});
 
 const rl = readline.createInterface({
   input: process.stdin,
