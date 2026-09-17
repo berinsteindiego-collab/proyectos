@@ -33,8 +33,10 @@ const MARKETS = {
   },
 
   BR: {
+    // Igual que MX: sin segmento de idioma, dejamos que Disney+
+    // decida solo (ver comentario en render-qc/qc-logic.mjs).
     locale: "pt-BR",
-    webPath: "pt-br",
+    webPath: "",
     profileDir: "disney-qc-poc/auth/profiles/br",
     secretFile: "disney-br-storage-state.json",
   },

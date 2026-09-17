@@ -22,7 +22,7 @@ const MARKETS = {
 
   BR: {
     locale: "pt-BR",
-    webPath: "pt-br",
+    webPath: "",
     profileDir:
       "disney-qc-poc/auth/profiles/br",
   },
