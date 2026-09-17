@@ -7,27 +7,47 @@ export const MARKETS = {
   ARG: {
     locale: "es-419",
     webPath: "es-419",
+    seasonWord: "Temporada",
     qcRegion: "LATAM",
     label: "Argentina",
     secretFile: "disney-arg-storage-state.json",
   },
 
   MX: {
-    locale: "es-419",
-    webPath: "es-419",
+    // A propósito en inglés: el buscador de Disney+ matchea por el
+    // título en el idioma de navegación (ej. "The Boss" / "El
+    // Encargado" / "O Chefe"), así que esta cuenta se usa para poder
+    // buscar títulos en inglés. El catálogo/región de la cuenta
+    // sigue siendo México — el audio/subs reales del contenido no
+    // cambian, solo el idioma en el que navegamos y buscamos.
+    // OJO: disneyplus.com en inglés (US) no tiene segmento de idioma
+    // en la URL (es "/home", no "/en/home") — por eso webPath queda
+    // vacío acá, a diferencia de ARG/BR.
+    locale: "en-US",
+    webPath: "",
+    seasonWord: "Season",
     qcRegion: "LATAM",
-    label: "México",
+    label: "México (búsqueda EN)",
     secretFile: "disney-mx-storage-state.json",
   },
 
   BR: {
     locale: "pt-BR",
     webPath: "pt-br",
+    seasonWord: "Temporada",
     qcRegion: "BR",
     label: "Brasil",
     secretFile: "disney-br-storage-state.json",
   },
 };
+
+// Arma URLs de disneyplus.com respetando que el mercado en inglés no
+// lleva segmento de idioma (webPath vacío) mientras que LATAM/BR sí.
+function disneyUrl(webPath, path) {
+  return webPath
+    ? `https://www.disneyplus.com/${webPath}/${path}`
+    : `https://www.disneyplus.com/${path}`;
+}
 
 const QC_REGIONS = {
   LATAM: {
@@ -339,7 +359,7 @@ export async function runQc({
     });
   });
 
-  await page.goto(`https://www.disneyplus.com/${marketConfig.webPath}/home`, {
+  await page.goto(disneyUrl(marketConfig.webPath, "home"), {
     waitUntil: "domcontentloaded",
     timeout: 60000,
   });
@@ -413,7 +433,7 @@ export async function runQc({
   const seriesEntity = seriesResult.id;
 
   await page.goto(
-    `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
+    disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
     { waitUntil: "domcontentloaded" }
   );
 
@@ -503,7 +523,7 @@ export async function runQc({
 
     if (popupClosed) {
       await page.goto(
-        `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
+        disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
         { waitUntil: "domcontentloaded" }
       );
 
@@ -511,9 +531,14 @@ export async function runQc({
       await dismissDisneyPopup(page);
     }
 
+    const seasonWordPattern = new RegExp(
+      `${marketConfig.seasonWord}\\s*\\d+`,
+      "i"
+    );
+
     const seasonButton = page
       .locator('button[aria-haspopup="listbox"]')
-      .filter({ hasText: /Temporada\s*\d+/i })
+      .filter({ hasText: seasonWordPattern })
       .last();
 
     try {
@@ -541,7 +566,7 @@ export async function runQc({
     await seasonButton.click();
 
     const seasonOption = page.locator(
-      `li[role="option"][title="Temporada ${seasonNumber}"]`
+      `li[role="option"][title="${marketConfig.seasonWord} ${seasonNumber}"]`
     );
 
     await seasonOption.waitFor({ state: "visible", timeout: 20000 });
@@ -549,7 +574,9 @@ export async function runQc({
     const seasonId = await seasonOption.getAttribute("id");
 
     if (!seasonId) {
-      throw new Error(`Temporada ${seasonNumber} no tiene Season ID.`);
+      throw new Error(
+        `${marketConfig.seasonWord} ${seasonNumber} no tiene Season ID.`
+      );
     }
 
     await seasonButton.click().catch(() => {});
@@ -635,7 +662,7 @@ export async function runQc({
     });
 
     await page.goto(
-      `https://www.disneyplus.com/${marketConfig.webPath}/browse/entity-${seriesEntity}`,
+      disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
       { waitUntil: "domcontentloaded" }
     );
 
