@@ -1,10 +1,11 @@
-import { Suspense } from "react";
-import ProjectPageContent from "./ProjectPageContent";
+import AskBox from "@/components/AskBox";
+import Panorama from "@/components/Panorama";
 
-export default function ProjectPage() {
+export default function ProyectosPage() {
   return (
-    <Suspense fallback={<p className="text-sm text-slate-500">Cargando...</p>}>
-      <ProjectPageContent />
-    </Suspense>
+    <>
+      <Panorama />
+      <AskBox />
+    </>
   );
 }
