@@ -29,6 +29,16 @@ const SECRETS_DIR = "/etc/secrets";
 // nombre del secret file, y qcRegion/label que usa la lógica de QC).
 const MARKETS = QC_MARKETS;
 
+// El free tier de Render tiene 512MB de RAM compartida. Cada QC abre
+// su propio Chromium headless, y si dos consultas se disparan casi
+// juntas, ambos procesos compiten por esa misma RAM/CPU y fallan de
+// formas erráticas (timeouts, "no pude capturar la autorización",
+// etc. — confirmado con pruebas de consultas seguidas). En vez de
+// dejarlas correr en paralelo, sólo dejamos avanzar una a la vez y
+// devolvemos 429 inmediatamente para las demás, para que quede claro
+// que hay que esperar en vez de fallar en silencio.
+let qcBusy = false;
+
 function sendJson(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json",
@@ -101,6 +111,18 @@ const server = http.createServer(async (req, res) => {
         error: `Mercado inválido: ${market}. Usá ARG, MX o BR.`,
       });
     }
+
+    if (qcBusy) {
+      return sendJson(res, 429, {
+        ok: false,
+        error:
+          "Ya hay una consulta de QC en curso. Esperá a que termine antes " +
+          "de lanzar otra (el free tier de Render no tiene RAM para correr " +
+          "dos Chromium al mismo tiempo).",
+      });
+    }
+
+    qcBusy = true;
 
     try {
       const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
@@ -277,6 +299,7 @@ const server = http.createServer(async (req, res) => {
       });
     } finally {
       if (browser) await browser.close();
+      qcBusy = false;
     }
   }
 
@@ -320,6 +343,18 @@ const server = http.createServer(async (req, res) => {
         error: "?season= y ?episode= deben ser números válidos (>=1).",
       });
     }
+
+    if (qcBusy) {
+      return sendJson(res, 429, {
+        ok: false,
+        error:
+          "Ya hay una consulta de QC en curso. Esperá a que termine antes " +
+          "de lanzar otra (el free tier de Render no tiene RAM para correr " +
+          "dos Chromium al mismo tiempo).",
+      });
+    }
+
+    qcBusy = true;
 
     try {
       const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
@@ -367,6 +402,7 @@ const server = http.createServer(async (req, res) => {
       });
     } finally {
       if (browser) await browser.close();
+      qcBusy = false;
     }
   }
 

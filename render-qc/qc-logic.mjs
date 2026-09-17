@@ -215,7 +215,18 @@ function findSeasonId(value, targetSeason) {
 
     const season = Number(node.visuals?.seasonNumber ?? node.seasonNumber);
 
-    if (season === targetSeason && typeof node.id === "string") {
+    // Un episodio también trae seasonNumber (a qué temporada
+    // pertenece), no solo el nodo de la temporada en sí. Si el nodo
+    // además tiene episodeNumber, es un episodio — lo descartamos acá
+    // para no devolver su id como si fuera el Season ID (causaba
+    // "Season API HTTP 404" en shows de una sola temporada).
+    const episodeNumber = node.visuals?.episodeNumber ?? node.episodeNumber;
+
+    if (
+      season === targetSeason &&
+      episodeNumber === undefined &&
+      typeof node.id === "string"
+    ) {
       found = node.id;
       return;
     }
@@ -231,6 +242,23 @@ function findSeasonId(value, targetSeason) {
   walk(value);
 
   return found;
+}
+
+// Después de cargar /home, Disney+ puede redirigir a un prefijo de
+// idioma distinto al que asumimos en MARKETS (ej. BR/MX sin prefijo
+// configurado, pero el propio router de Disney+ decide servir
+// "/pt-br/home"). Usamos el prefijo real resuelto en vez de nuestro
+// guess estático para las navegaciones siguientes (evita el
+// "page.goto interrupted by another navigation to .../pt-br/home").
+function extractWebPath(currentUrl) {
+  try {
+    const { pathname } = new URL(currentUrl);
+    const match = pathname.match(/^\/([a-z]{2}(?:-[a-zA-Z0-9]+)?)\/home(?:\/|$)/i);
+
+    return match ? match[1] : "";
+  } catch {
+    return null;
+  }
 }
 
 function findEpisodeIn(value, targetSeason, targetEpisode) {
@@ -392,6 +420,12 @@ export async function runQc({
     );
   }
 
+  // El webPath configurado en MARKETS es solo un punto de partida.
+  // Derivamos el prefijo real a partir de a dónde nos terminó
+  // llevando Disney+ al cargar /home, y usamos ese para el resto de
+  // las navegaciones (browse/entity-...) en vez del guess estático.
+  const effectiveWebPath = extractWebPath(page.url()) ?? marketConfig.webPath;
+
   // -----------------------------------------
   // Buscar contenido y resolver Series Entity
   // -----------------------------------------
@@ -464,7 +498,7 @@ export async function runQc({
   });
 
   await page.goto(
-    disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
+    disneyUrl(effectiveWebPath, `browse/entity-${seriesEntity}`),
     { waitUntil: "domcontentloaded" }
   );
 
@@ -554,7 +588,7 @@ export async function runQc({
 
     if (popupClosed) {
       await page.goto(
-        disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
+        disneyUrl(effectiveWebPath, `browse/entity-${seriesEntity}`),
         { waitUntil: "domcontentloaded" }
       );
 
@@ -713,18 +747,38 @@ export async function runQc({
     });
 
     await page.goto(
-      disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
+      disneyUrl(effectiveWebPath, `browse/entity-${seriesEntity}`),
       { waitUntil: "domcontentloaded" }
     );
 
-    const movieTimeout = Date.now() + 10000;
+    // 10s resultó corto en el free tier de Render (menos CPU que una
+    // PC normal para que la SPA termine de pedir el detalle de la
+    // película). Lo alargamos a 25s, como ya hicimos con las otras
+    // esperas de este mismo servicio.
+    const movieTimeout = Date.now() + 25000;
 
     while (!moviePlaybackAction && Date.now() < movieTimeout) {
       await page.waitForTimeout(250);
     }
 
     if (!moviePlaybackAction) {
-      throw new Error("No encontré Playback Action para la película.");
+      // Diagnóstico: en vez de solo "no encontré", mostramos dónde
+      // quedó la página y qué texto hay, para poder distinguir un
+      // timeout real de una navegación que terminó en otro lado
+      // (login, popup, contenido no encontrado, etc.).
+      const debugUrl = page.url();
+      let bodySnippet = "";
+
+      try {
+        bodySnippet = (await page.textContent("body"))?.slice(0, 400) ?? "";
+      } catch {
+        // Ignorar si tampoco se puede leer el body.
+      }
+
+      throw new Error(
+        "No encontré Playback Action para la película. " +
+        `url=${debugUrl} body="${bodySnippet.replace(/\s+/g, " ").trim()}"`
+      );
     }
 
     playbackAction = moviePlaybackAction;
