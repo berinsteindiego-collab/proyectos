@@ -1,9 +1,10 @@
 [build]
-  command = "npm run build"
+  command = "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium --only-shell && npm run build"
   publish = ".next"
 
 [functions]
   external_node_modules = ["playwright", "playwright-core"]
+  included_files = ["node_modules/playwright-core/.local-browsers/**"]
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
