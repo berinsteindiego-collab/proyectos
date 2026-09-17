@@ -32,8 +32,13 @@ export const MARKETS = {
   },
 
   BR: {
+    // Igual que MX: sin segmento de idioma en la URL. Poniendo
+    // "/pt-br/" a mano, Disney+ parece intentar normalizarlo con su
+    // propia detección (basada en el Accept-Language de acá abajo)
+    // y termina anteponiendo el suyo sin sacar el nuestro
+    // ("pt-br/pt-BR/home", 404). Dejamos que decida solo.
     locale: "pt-BR",
-    webPath: "pt-br",
+    webPath: "",
     seasonWord: "Temporada",
     qcRegion: "BR",
     label: "Brasil",
