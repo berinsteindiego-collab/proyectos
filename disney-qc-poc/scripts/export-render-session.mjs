@@ -18,21 +18,21 @@ const MARKETS = {
     locale: "es-419",
     webPath: "es-419",
     profileDir: "disney-qc-poc/auth/profiles/arg",
-    envVar: "DISNEY_ARG_STORAGE_STATE",
+    secretFile: "disney-arg-storage-state.json",
   },
 
   MX: {
     locale: "es-419",
     webPath: "es-419",
     profileDir: "disney-qc-poc/auth/profiles/mx",
-    envVar: "DISNEY_MX_STORAGE_STATE",
+    secretFile: "disney-mx-storage-state.json",
   },
 
   BR: {
     locale: "pt-BR",
     webPath: "pt-br",
     profileDir: "disney-qc-poc/auth/profiles/br",
-    envVar: "DISNEY_BR_STORAGE_STATE",
+    secretFile: "disney-br-storage-state.json",
   },
 };
 
@@ -110,27 +110,32 @@ const storageState = await context.storageState();
 
 await context.close();
 
-const json = JSON.stringify(storageState);
-const encoded = Buffer.from(json, "utf8").toString("base64");
+const json = JSON.stringify(storageState, null, 2);
 
 const outDir = path.resolve("disney-qc-poc/auth/render-env");
 fs.mkdirSync(outDir, { recursive: true });
 
-const outFile = path.join(outDir, `${market}.txt`);
-fs.writeFileSync(outFile, encoded, "utf8");
+const outFile = path.join(outDir, config.secretFile);
+fs.writeFileSync(outFile, json, "utf8");
 
 console.log("");
 console.log(`✓ Guardado en ${outFile}`);
-console.log(`  Tamaño: ${(encoded.length / 1024).toFixed(1)} KB`);
+console.log(`  Tamaño: ${(json.length / 1024).toFixed(1)} KB`);
 console.log("");
-console.log("Próximo paso en Render:");
-console.log(`1. Abrí el servicio "render-qc" → Environment.`);
-console.log(`2. Creá/actualizá la variable ${config.envVar}.`);
-console.log(`3. Pegá como valor el contenido íntegro de ese archivo.`);
+console.log("Próximo paso en Render (Secret Files, NO Environment Variables):");
+console.log(`1. Abrí el servicio "render-qc" → Environment → Secret Files.`);
+console.log(`2. + Add Secret File → Filename: ${config.secretFile}`);
+console.log(`3. En Contents, pegá el contenido íntegro de ese archivo.`);
 console.log(`4. Guardá y esperá el redeploy automático.`);
 console.log("");
 console.log(
+  "Si ya habías cargado DISNEY_" + market + "_STORAGE_STATE como" +
+  " Environment Variable, borrala — es lo que causaba" +
+  " 'argument list too long' en el build."
+);
+console.log("");
+console.log(
   "Repetí este script cuando la sesión expire (Disney eventualmente" +
-  " la invalida) para volver a generar el valor y actualizar Render."
+  " la invalida) para volver a generar el archivo y actualizar Render."
 );
 console.log("");
