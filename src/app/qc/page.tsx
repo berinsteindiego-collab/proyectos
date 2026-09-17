@@ -121,6 +121,7 @@ export default function QCPage() {
   const [episode, setEpisode] = useState("");
   const [market, setMarket] = useState("ARG");
   const [loading, setLoading] = useState(false);
+  const [busyRetrying, setBusyRetrying] = useState(false);
   const [result, setResult] = useState<QcResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,6 +129,7 @@ export default function QCPage() {
     e.preventDefault();
 
     setLoading(true);
+    setBusyRetrying(false);
     setResult(null);
     setError(null);
 
@@ -149,11 +151,37 @@ export default function QCPage() {
       if (season) params.set("season", season);
       if (episode) params.set("episode", episode);
 
-      const response = await fetch(
-        `${renderUrl.replace(/\/$/, "")}/qc?${params.toString()}`
-      );
+      const url = `${renderUrl.replace(/\/$/, "")}/qc?${params.toString()}`;
 
-      const data = await response.json();
+      // Render solo procesa un QC a la vez (ver server.mjs): si hay
+      // otra consulta en curso devuelve 429. En vez de mostrarle ese
+      // error crudo a la persona, reintentamos solos cada 5s durante
+      // hasta 3 minutos — cubre el caso de que otro compañero esté
+      // usando el QC Center al mismo tiempo.
+      const retryDeadline = Date.now() + 3 * 60 * 1000;
+
+      let response: Response;
+      let data: QcResult & { ok: boolean; error?: string };
+
+      while (true) {
+        response = await fetch(url);
+        data = await response.json();
+
+        if (response.status === 429) {
+          if (Date.now() > retryDeadline) {
+            throw new Error(
+              "Hay otra consulta de QC en curso hace varios minutos. " +
+              "Probá de nuevo en un rato."
+            );
+          }
+
+          setBusyRetrying(true);
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          continue;
+        }
+
+        break;
+      }
 
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "No se pudo ejecutar el QC.");
@@ -166,6 +194,7 @@ export default function QCPage() {
       );
     } finally {
       setLoading(false);
+      setBusyRetrying(false);
     }
   }
 
@@ -241,7 +270,18 @@ export default function QCPage() {
         </div>
       </form>
 
-      {loading && <LoadingAnimation />}
+      {loading && (
+        <div className="mt-4">
+          {busyRetrying && (
+            <p className="mb-2 text-center text-xs font-medium text-amber-600 dark:text-amber-400">
+              Hay otra consulta de QC en curso — esperando turno para
+              arrancar (reintenta solo)...
+            </p>
+          )}
+
+          <LoadingAnimation />
+        </div>
+      )}
 
       {error && (
         <div className="mx-auto mt-6 max-w-xl rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
