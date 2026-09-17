@@ -596,116 +596,143 @@ export async function runQc({
       await dismissDisneyPopup(page);
     }
 
-    // 1) Intentamos resolver el Season ID de las respuestas de API que
-    // ya capturamos, sin clickear nada. Shows con una sola temporada
-    // no tienen selector clickeable, así que esto es necesario para
-    // esos casos y evita depender del DOM para el resto.
-    let seasonId = findSeasonId(entityPageJsonBodies, seasonNumber);
+    // 1) Shows de una sola temporada muchas veces no traen un nodo de
+    // "temporada" aparte en la API (no hay nada entre qué elegir, así
+    // que Disney+ no arma ese contenedor) — sólo los episodios
+    // sueltos, cada uno ya con su propio seasonNumber/episodeNumber,
+    // directo en las respuestas de la entity page. Probamos resolver
+    // el episodio ahí primero, antes de meternos con Season ID.
+    let episode = findEpisodeIn(
+      entityPageJsonBodies,
+      seasonNumber,
+      episodeNumber
+    );
 
-    if (!seasonId) {
-      const apiDeadline = Date.now() + 8000;
+    if (!episode) {
+      const directDeadline = Date.now() + 8000;
 
-      while (!seasonId && Date.now() < apiDeadline) {
+      while (!episode && Date.now() < directDeadline) {
         await page.waitForTimeout(500);
-        seasonId = findSeasonId(entityPageJsonBodies, seasonNumber);
-      }
-    }
-
-    // 2) Fallback: shows con más de una temporada exponen un selector
-    // clickeable (button[aria-haspopup="listbox"]) — lo usamos solo
-    // si el paso anterior no encontró nada.
-    if (!seasonId) {
-      const seasonWordPattern = new RegExp(
-        `${marketConfig.seasonWord}\\s*\\d+`,
-        "i"
-      );
-
-      const seasonButton = page
-        .locator('button[aria-haspopup="listbox"]')
-        .filter({ hasText: seasonWordPattern })
-        .last();
-
-      try {
-        await seasonButton.waitFor({ state: "visible", timeout: 15000 });
-      } catch (error) {
-        // Diagnóstico: si no aparece ni el selector ni lo resolvimos
-        // por API, mostramos qué URL/texto quedó realmente en
-        // pantalla (perfil, popup distinto, contenido no encontrado,
-        // etc.) en vez de solo "timeout".
-        const debugUrl = page.url();
-        let bodySnippet = "";
-
-        try {
-          bodySnippet = (await page.textContent("body"))?.slice(0, 400) ?? "";
-        } catch {
-          // Ignorar si tampoco se puede leer el body.
-        }
-
-        throw new Error(
-          `No pude resolver la temporada ${seasonNumber} (ni por API ni por selector). ` +
-          `url=${debugUrl} body="${bodySnippet.replace(/\s+/g, " ").trim()}"`
+        episode = findEpisodeIn(
+          entityPageJsonBodies,
+          seasonNumber,
+          episodeNumber
         );
       }
-
-      await seasonButton.click();
-
-      const seasonOption = page.locator(
-        `li[role="option"][title="${marketConfig.seasonWord} ${seasonNumber}"]`
-      );
-
-      await seasonOption.waitFor({ state: "visible", timeout: 20000 });
-
-      seasonId = await seasonOption.getAttribute("id");
-
-      if (!seasonId) {
-        throw new Error(
-          `${marketConfig.seasonWord} ${seasonNumber} no tiene Season ID.`
-        );
-      }
-
-      await seasonButton.click().catch(() => {});
-    }
-
-    const seasonBaseUrl =
-      `https://disney.api.edge.bamgrid.com/explore/v1.18/season/${seasonId}`;
-
-    async function getSeasonPage(after = null) {
-      const params = new URLSearchParams();
-      params.set("limit", "24");
-      if (after) params.set("after", after);
-
-      const response = await context.request.get(
-        `${seasonBaseUrl}?${params.toString()}`,
-        { headers: disneyApiHeaders }
-      );
-
-      if (!response.ok()) {
-        throw new Error(`Season API HTTP ${response.status()}`);
-      }
-
-      return response.json();
-    }
-
-    const firstPageJson = await getSeasonPage();
-
-    let episode = findEpisodeIn(firstPageJson, seasonNumber, episodeNumber);
-
-    let offset = 24;
-
-    while (!episode && offset < 200) {
-      const after = Buffer.from(JSON.stringify({ offset })).toString(
-        "base64"
-      );
-
-      const nextPageJson = await getSeasonPage(after);
-      episode = findEpisodeIn(nextPageJson, seasonNumber, episodeNumber);
-
-      if (episode) break;
-      offset += 24;
     }
 
     if (!episode) {
-      throw new Error(`No encontré T${seasonNumber}:E${episodeNumber}.`);
+      // 2) Shows con más de una temporada: resolvemos el Season ID de
+      // las respuestas de API ya capturadas, sin clickear nada.
+      let seasonId = findSeasonId(entityPageJsonBodies, seasonNumber);
+
+      if (!seasonId) {
+        const apiDeadline = Date.now() + 8000;
+
+        while (!seasonId && Date.now() < apiDeadline) {
+          await page.waitForTimeout(500);
+          seasonId = findSeasonId(entityPageJsonBodies, seasonNumber);
+        }
+      }
+
+      // 3) Último fallback: selector clickeable en el DOM
+      // (button[aria-haspopup="listbox"]) — sólo si nada de lo
+      // anterior encontró nada.
+      if (!seasonId) {
+        const seasonWordPattern = new RegExp(
+          `${marketConfig.seasonWord}\\s*\\d+`,
+          "i"
+        );
+
+        const seasonButton = page
+          .locator('button[aria-haspopup="listbox"]')
+          .filter({ hasText: seasonWordPattern })
+          .last();
+
+        try {
+          await seasonButton.waitFor({ state: "visible", timeout: 15000 });
+        } catch (error) {
+          // Diagnóstico: si no aparece ni el selector ni lo resolvimos
+          // por API, mostramos qué URL/texto quedó realmente en
+          // pantalla (perfil, popup distinto, contenido no encontrado,
+          // etc.) en vez de solo "timeout".
+          const debugUrl = page.url();
+          let bodySnippet = "";
+
+          try {
+            bodySnippet =
+              (await page.textContent("body"))?.slice(0, 400) ?? "";
+          } catch {
+            // Ignorar si tampoco se puede leer el body.
+          }
+
+          throw new Error(
+            `No pude resolver la temporada ${seasonNumber} ` +
+            `(ni por episodio directo, ni por season ID, ni por selector). ` +
+            `url=${debugUrl} body="${bodySnippet.replace(/\s+/g, " ").trim()}"`
+          );
+        }
+
+        await seasonButton.click();
+
+        const seasonOption = page.locator(
+          `li[role="option"][title="${marketConfig.seasonWord} ${seasonNumber}"]`
+        );
+
+        await seasonOption.waitFor({ state: "visible", timeout: 20000 });
+
+        seasonId = await seasonOption.getAttribute("id");
+
+        if (!seasonId) {
+          throw new Error(
+            `${marketConfig.seasonWord} ${seasonNumber} no tiene Season ID.`
+          );
+        }
+
+        await seasonButton.click().catch(() => {});
+      }
+
+      const seasonBaseUrl =
+        `https://disney.api.edge.bamgrid.com/explore/v1.18/season/${seasonId}`;
+
+      async function getSeasonPage(after = null) {
+        const params = new URLSearchParams();
+        params.set("limit", "24");
+        if (after) params.set("after", after);
+
+        const response = await context.request.get(
+          `${seasonBaseUrl}?${params.toString()}`,
+          { headers: disneyApiHeaders }
+        );
+
+        if (!response.ok()) {
+          throw new Error(`Season API HTTP ${response.status()}`);
+        }
+
+        return response.json();
+      }
+
+      const firstPageJson = await getSeasonPage();
+
+      episode = findEpisodeIn(firstPageJson, seasonNumber, episodeNumber);
+
+      let offset = 24;
+
+      while (!episode && offset < 200) {
+        const after = Buffer.from(JSON.stringify({ offset })).toString(
+          "base64"
+        );
+
+        const nextPageJson = await getSeasonPage(after);
+        episode = findEpisodeIn(nextPageJson, seasonNumber, episodeNumber);
+
+        if (episode) break;
+        offset += 24;
+      }
+
+      if (!episode) {
+        throw new Error(`No encontré T${seasonNumber}:E${episodeNumber}.`);
+      }
     }
 
     playbackAction = episode.actions?.find(
