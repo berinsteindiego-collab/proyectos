@@ -483,7 +483,7 @@ export async function runQc({
 
   if (isSeries) {
     await page.waitForLoadState("domcontentloaded");
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(4000);
 
     const popupClosed = await dismissDisneyPopup(page);
 
@@ -493,7 +493,7 @@ export async function runQc({
         { waitUntil: "domcontentloaded" }
       );
 
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(4000);
       await dismissDisneyPopup(page);
     }
 
@@ -502,14 +502,35 @@ export async function runQc({
       .filter({ hasText: /Temporada\s*\d+/i })
       .last();
 
-    await seasonButton.waitFor({ state: "visible", timeout: 15000 });
+    try {
+      await seasonButton.waitFor({ state: "visible", timeout: 30000 });
+    } catch (error) {
+      // Diagnóstico: si no aparece el selector de temporada, mostramos
+      // qué URL/texto quedó realmente en pantalla (perfil, popup
+      // distinto, contenido no encontrado, etc.) en vez de solo
+      // "timeout".
+      const debugUrl = page.url();
+      let bodySnippet = "";
+
+      try {
+        bodySnippet = (await page.textContent("body"))?.slice(0, 400) ?? "";
+      } catch {
+        // Ignorar si tampoco se puede leer el body.
+      }
+
+      throw new Error(
+        `No apareció el selector de temporada. url=${debugUrl} ` +
+        `body="${bodySnippet.replace(/\s+/g, " ").trim()}"`
+      );
+    }
+
     await seasonButton.click();
 
     const seasonOption = page.locator(
       `li[role="option"][title="Temporada ${seasonNumber}"]`
     );
 
-    await seasonOption.waitFor({ state: "visible", timeout: 10000 });
+    await seasonOption.waitFor({ state: "visible", timeout: 20000 });
 
     const seasonId = await seasonOption.getAttribute("id");
 
