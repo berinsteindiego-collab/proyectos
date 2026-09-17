@@ -1,7 +1,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import { chromium } from "playwright";
-import { MARKETS as QC_MARKETS, runQc } from "./qc-logic.mjs";
+import { MARKETS as QC_MARKETS, runQc, disneyUrl } from "./qc-logic.mjs";
 
 const port = Number(process.env.PORT || 10000);
 
@@ -198,7 +198,7 @@ const server = http.createServer(async (req, res) => {
       });
 
       await page.goto(
-        `https://www.disneyplus.com/${config.webPath}/home`,
+        disneyUrl(config.webPath, "home"),
         {
           waitUntil: "domcontentloaded",
           timeout: 60000,

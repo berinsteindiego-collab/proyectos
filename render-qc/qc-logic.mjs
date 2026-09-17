@@ -48,7 +48,7 @@ export const MARKETS = {
 
 // Arma URLs de disneyplus.com respetando que el mercado en inglés no
 // lleva segmento de idioma (webPath vacío) mientras que LATAM/BR sí.
-function disneyUrl(webPath, path) {
+export function disneyUrl(webPath, path) {
   return webPath
     ? `https://www.disneyplus.com/${webPath}/${path}`
     : `https://www.disneyplus.com/${path}`;
