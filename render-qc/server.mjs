@@ -4,7 +4,9 @@ import { chromium } from "playwright";
 const port = Number(process.env.PORT || 10000);
 
 const server = http.createServer(async (req, res) => {
-  if (req.url === "/health") {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (url.pathname === "/health") {
     res.writeHead(200, {
       "Content-Type": "application/json",
     });
@@ -19,7 +21,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === "/browser-test") {
+  if (url.pathname === "/browser-test") {
     let browser;
 
     try {
@@ -46,10 +48,7 @@ const server = http.createServer(async (req, res) => {
       res.end(
         JSON.stringify({
           ok: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : String(error),
+          error: error instanceof Error ? error.message : String(error),
         })
       );
     } finally {
@@ -69,6 +68,7 @@ const server = http.createServer(async (req, res) => {
     JSON.stringify({
       ok: false,
       error: "Not found",
+      pathname: url.pathname,
     })
   );
 });
