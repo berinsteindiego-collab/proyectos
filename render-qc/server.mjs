@@ -32,6 +32,11 @@ const MARKETS = QC_MARKETS;
 function sendJson(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json",
+    // El navegador (Netlify) llama a este servicio directo,
+    // cross-origin, para no depender del límite de tiempo de las
+    // funciones de Netlify. Sin este header el browser descarta la
+    // respuesta aunque el request haya llegado bien.
+    "Access-Control-Allow-Origin": "*",
   });
 
   res.end(JSON.stringify(body));
@@ -39,6 +44,17 @@ function sendJson(res, status, body) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+    });
+
+    return res.end();
+  }
 
   if (url.pathname === "/health") {
     return sendJson(res, 200, {
