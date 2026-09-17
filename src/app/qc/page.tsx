@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type QcTrack = {
   name: string;
@@ -36,6 +36,59 @@ const MARKETS = [
   { value: "MX", label: "México (buscar en inglés)" },
   { value: "BR", label: "Brasil" },
 ];
+
+// Animación de espera: íconos y frases genéricos con onda Disney+
+// (nada de personajes con nombre), que van rotando al azar mientras
+// dura la consulta real contra Disney+.
+const LOADING_MOMENTS = [
+  { icon: "🎬", text: "Rebobinando la cinta mágica..." },
+  { icon: "🍿", text: "Preparando los pochoclos..." },
+  { icon: "🎟️", text: "Buscando el boleto dorado..." },
+  { icon: "✨", text: "Espolvoreando un poco de magia..." },
+  { icon: "🎞️", text: "Desenrollando el rollo de película..." },
+  { icon: "🌟", text: "Pidiendo un deseo a la primera estrella..." },
+  { icon: "🏰", text: "Golpeando la puerta del castillo..." },
+  { icon: "🪄", text: "Agitando la varita mágica..." },
+];
+
+function LoadingAnimation() {
+  const [index, setIndex] = useState(() =>
+    Math.floor(Math.random() * LOADING_MOMENTS.length)
+  );
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setIndex((prev) => {
+        const next = Math.floor(Math.random() * LOADING_MOMENTS.length);
+        return next === prev ? (next + 1) % LOADING_MOMENTS.length : next;
+      });
+    }, 2200);
+
+    return () => clearInterval(id);
+  }, []);
+
+  const moment = LOADING_MOMENTS[index];
+
+  return (
+    <div className="mt-4 flex flex-col items-center gap-2">
+      <span
+        key={index}
+        className="animate-bounce text-3xl"
+        aria-hidden="true"
+      >
+        {moment.icon}
+      </span>
+
+      <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+        {moment.text}
+      </p>
+
+      <p className="text-center text-[11px] text-slate-400 dark:text-slate-600">
+        Puede tardar 30-60s (login, búsqueda y playback contra Disney+ real).
+      </p>
+    </div>
+  );
+}
 
 function TrackList({ label, tracks }: { label: string; tracks: QcTrack[] }) {
   return (
@@ -188,11 +241,7 @@ export default function QCPage() {
         </div>
       </form>
 
-      {loading && (
-        <p className="mt-4 text-center text-xs text-slate-400">
-          Puede tardar 30-60s (login, búsqueda y playback contra Disney+ real).
-        </p>
-      )}
+      {loading && <LoadingAnimation />}
 
       {error && (
         <div className="mx-auto mt-6 max-w-xl rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
