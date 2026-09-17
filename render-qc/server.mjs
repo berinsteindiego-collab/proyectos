@@ -4,6 +4,19 @@ import { chromium } from "playwright";
 
 const port = Number(process.env.PORT || 10000);
 
+// Red de seguridad: un error suelto en un listener de Playwright
+// (por ejemplo request.allHeaders() sobre una request ya descartada)
+// es una "unhandled rejection" y por defecto Node mata todo el
+// proceso con eso — lo que se ve desde afuera como un 502 constante
+// hasta que Render reinicia el servicio. Logueamos y seguimos.
+process.on("unhandledRejection", (error) => {
+  console.error("unhandledRejection:", error);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("uncaughtException:", error);
+});
+
 // Las sesiones se leen de Render "Secret Files" (no de env vars: el
 // storageState de Disney+ es demasiado grande para pasar como
 // variable de entorno y rompe el build con "argument list too long").
@@ -126,55 +139,66 @@ const server = http.createServer(async (req, res) => {
       const consoleErrors = [];
       const pageErrors = [];
 
-      page.on("request", async (request) => {
-        const reqUrl = request.url();
+      page.on("request", (request) => {
+        // No hacemos la lógica async directo adentro del listener:
+        // si algo tira acá (request ya descartada, etc.) y no hay
+        // catch, Node mata todo el proceso. Encapsulamos en una
+        // promesa con .catch() propio.
+        (async () => {
+          const reqUrl = request.url();
 
-        if (
-          reqUrl.includes("bamgrid.com") ||
-          reqUrl.includes("disneyplus.com/graphql") ||
-          reqUrl.includes("execute-api")
-        ) {
-          bamRequests.push({
-            url: reqUrl,
-            hasAuth: Boolean(
-              (await request.allHeaders()).authorization
-            ),
-          });
-        }
+          if (
+            reqUrl.includes("bamgrid.com") ||
+            reqUrl.includes("disneyplus.com/graphql") ||
+            reqUrl.includes("execute-api")
+          ) {
+            const headers = await request.allHeaders();
 
-        if (disneyApiHeaders) return;
+            bamRequests.push({
+              url: reqUrl,
+              hasAuth: Boolean(headers.authorization),
+            });
 
-        if (!reqUrl.includes("disney.api.edge.bamgrid.com/explore/")) {
-          return;
-        }
-
-        const headers = await request.allHeaders();
-
-        if (headers.authorization) {
-          disneyApiHeaders = {
-            authorization: headers.authorization,
-          };
-        }
+            if (
+              !disneyApiHeaders &&
+              reqUrl.includes(
+                "disney.api.edge.bamgrid.com/explore/"
+              ) &&
+              headers.authorization
+            ) {
+              disneyApiHeaders = {
+                authorization: headers.authorization,
+              };
+            }
+          }
+        })().catch((error) => {
+          console.error("request listener error:", error);
+        });
       });
 
       page.on("response", (response) => {
-        const resUrl = response.url();
+        try {
+          const resUrl = response.url();
 
-        if (
-          resUrl.includes("bamgrid.com") &&
-          response.status() >= 400
-        ) {
-          bamRequests.push({
-            url: resUrl,
-            status: response.status(),
-            error: true,
-          });
+          if (resUrl.includes("bamgrid.com") && response.status() >= 400) {
+            bamRequests.push({
+              url: resUrl,
+              status: response.status(),
+              error: true,
+            });
+          }
+        } catch (error) {
+          console.error("response listener error:", error);
         }
       });
 
       page.on("console", (msg) => {
-        if (msg.type() === "error") {
-          consoleErrors.push(msg.text().slice(0, 300));
+        try {
+          if (msg.type() === "error") {
+            consoleErrors.push(msg.text().slice(0, 300));
+          }
+        } catch (error) {
+          console.error("console listener error:", error);
         }
       });
 
