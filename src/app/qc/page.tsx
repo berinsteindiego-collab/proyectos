@@ -20,6 +20,7 @@ type QcResult = {
     match?: boolean;
     metadataTitle?: string;
     logoText?: string;
+    imageUrl?: string;
     error?: string;
   };
   tracks: {
@@ -216,16 +217,27 @@ export default function QCPage() {
 
           <div className="mb-4 rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-800/50">
             {result.titleTreatment?.available ? (
-              <p
-                className={
-                  result.titleTreatment.match
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-amber-600 dark:text-amber-400"
-                }
-              >
-                {result.titleTreatment.match ? "✓" : "⚠"} Title treatment:{" "}
-                {result.titleTreatment.logoText} vs. {result.titleTreatment.metadataTitle}
-              </p>
+              <div className="flex items-center gap-3">
+                {result.titleTreatment.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={result.titleTreatment.imageUrl}
+                    alt="Title treatment"
+                    className="h-10 w-auto shrink-0 rounded bg-black/80 object-contain px-2 py-1"
+                  />
+                ) : null}
+
+                <p
+                  className={
+                    result.titleTreatment.match
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-amber-600 dark:text-amber-400"
+                  }
+                >
+                  {result.titleTreatment.match ? "✓" : "⚠"} Title treatment:{" "}
+                  {result.titleTreatment.logoText} vs. {result.titleTreatment.metadataTitle}
+                </p>
+              </div>
             ) : (
               <p className="text-slate-400">
                 Title treatment no disponible ({result.titleTreatment?.error})
