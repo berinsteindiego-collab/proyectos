@@ -14,8 +14,19 @@ import {
   listUpcomingProjectsTool,
   listProjectsAtRiskTool,
   findTaskTool,
+  getFeedsCapacityTool,
+  listFeedsActiveInMonthTool,
+  getStandalonesTotalsByYearTool,
+  getStandalonesTotalsByMonthTool,
+  listStandalonesActiveInMonthTool,
 } from "./tools";
-import { tasksToListPayload, upcomingToListPayload, atRiskToListPayload } from "./format";
+import {
+  tasksToListPayload,
+  upcomingToListPayload,
+  atRiskToListPayload,
+  feedsActiveToListPayload,
+  standalonesActiveToListPayload,
+} from "./format";
 import type { ListPayload } from "@/lib/project-status/types";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -36,7 +47,8 @@ Reglas estrictas:
 - Respondé siempre en español, corto y directo, sin inventar formato adicional.
 - "Fecha de inicio", "start date", "cuándo arranca/empieza/inicia" y "próximo en iniciar/empezar" se refieren siempre al campo Fecha Inicio del proyecto (evento), nunca a un ítem o tarea del checklist que tenga "Start Date" en el nombre — esas son tareas de seguimiento, no la fecha real. Para "¿qué proyecto es el próximo en iniciar/empezar?" usá list_upcoming_projects (ya viene ordenada por días para lanzamiento) y citá el startDate real de cada proyecto en tu respuesta, no solo los días restantes.
 - Cada tarea puede tener "responsible" (el área/equipo responsable, ej. "Programming", "Legal") y "owners" (persona o personas puntuales asignadas, por nombre). Para preguntas como "¿quién es responsable de <tarea>?", "¿quién está a cargo de <tarea>?" o "¿de quién depende <tarea>?", usá find_task para ubicar la tarea dentro del proyecto y respondé con "responsible" y "owners" tal cual vienen (si "owners" está vacío, decilo así en vez de inventar un nombre). Si find_task devuelve varias tareas que coinciden, listalas y pedile al usuario que aclare cuál.
-- Cuando el resultado de una tool sea un LISTADO de tareas o proyectos (get_pending_tasks, get_blocked_tasks, get_overdue_tasks, get_project_deadlines, list_upcoming_projects, list_projects_at_risk), NO repitas el listado completo en tu respuesta de texto ni uses markdown (nada de negrita con asteriscos, guiones ni numeración): la interfaz ya muestra esos items aparte, en tarjetas con su propio formato. Alcanza con una frase corta de introducción, por ejemplo "Encontré 3 tareas pendientes en Telefe." o "Hay 2 proyectos en riesgo.". Para respuestas de estado (get_project_status) o de responsable de una tarea (find_task), sí respondé con el detalle normalmente, en texto corto y sin markdown.`;
+- Cuando el resultado de una tool sea un LISTADO de tareas o proyectos (get_pending_tasks, get_blocked_tasks, get_overdue_tasks, get_project_deadlines, list_upcoming_projects, list_projects_at_risk, list_feeds_active_in_month, list_standalones_active_in_month), NO repitas el listado completo en tu respuesta de texto ni uses markdown (nada de negrita con asteriscos, guiones ni numeración): la interfaz ya muestra esos items aparte, en tarjetas con su propio formato. Alcanza con una frase corta de introducción, por ejemplo "Encontré 3 tareas pendientes en Telefe." o "Hay 2 proyectos en riesgo.". Para respuestas de estado (get_project_status) o de responsable de una tarea (find_task), sí respondé con el detalle normalmente, en texto corto y sin markdown.
+- "Feeds" (feeds 24/7, capacidad, pico simultáneo) y "Standalones" (eventos standalone) NO son proyectos de Eventos — son dos módulos aparte con su propio modelo mensual en Airtable. Para preguntas sobre feeds usá get_feeds_capacity (pico de feeds simultáneos en un año) o list_feeds_active_in_month (qué proyectos de feeds están activos en un mes puntual). Para preguntas sobre standalones usá get_standalones_totals_by_year (total de eventos del año y cantidad de shows distintos), get_standalones_totals_by_month o list_standalones_active_in_month. Nunca sumes ni calcules vos mismo estos números — Airtable ya los tiene resueltos (rollups/columnas); si la pregunta no da año ni mes, pedile al usuario que aclare cuál.`;
 
 const TOOLS = [
   {
@@ -148,6 +160,76 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_feeds_capacity",
+      description:
+        "Pico de Feeds 24/7 simultáneos en un año calendario (capacidad máxima real, no una suma de proyectos que se solapan). Usala para '¿cuál es la capacidad de feeds en <año>?' o '¿cuántos feeds simultáneos hay en <año>?'.",
+      parameters: {
+        type: "object",
+        properties: { year: { type: "number", description: "Año, ej. 2026." } },
+        required: ["year"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_feeds_active_in_month",
+      description:
+        "Lista de proyectos/feeds 24/7 activos en un mes puntual (ej. 'octubre 2026'). Usala para '¿qué feeds están activos en <mes>?'.",
+      parameters: {
+        type: "object",
+        properties: {
+          month_query: { type: "string", description: "Mes y año en texto libre, ej. 'octubre 2026'." },
+        },
+        required: ["month_query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_standalones_totals_by_year",
+      description:
+        "Total de eventos standalone en un año (suma de todos los meses, coincide con el TOTAL del Excel original) y cantidad de shows/proyectos distintos ese año. Usala para '¿cuántos standalones hay en <año>?'.",
+      parameters: {
+        type: "object",
+        properties: { year: { type: "number", description: "Año, ej. 2026." } },
+        required: ["year"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_standalones_totals_by_month",
+      description: "Total de eventos standalone en un mes puntual (ej. 'junio 2026').",
+      parameters: {
+        type: "object",
+        properties: {
+          month_query: { type: "string", description: "Mes y año en texto libre, ej. 'junio 2026'." },
+        },
+        required: ["month_query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_standalones_active_in_month",
+      description:
+        "Lista de shows/eventos standalone activos en un mes puntual, con su cantidad de eventos ese mes. Usala para '¿qué standalones están activos en <mes>?'.",
+      parameters: {
+        type: "object",
+        properties: {
+          month_query: { type: "string", description: "Mes y año en texto libre, ej. 'junio 2026'." },
+        },
+        required: ["month_query"],
+      },
+    },
+  },
 ];
 
 interface GroqToolCall {
@@ -183,6 +265,16 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       return listProjectsAtRiskTool();
     case "find_task":
       return findTaskTool(projectName(), String(args.task_query ?? ""));
+    case "get_feeds_capacity":
+      return getFeedsCapacityTool(Number(args.year));
+    case "list_feeds_active_in_month":
+      return listFeedsActiveInMonthTool(String(args.month_query ?? ""));
+    case "get_standalones_totals_by_year":
+      return getStandalonesTotalsByYearTool(Number(args.year));
+    case "get_standalones_totals_by_month":
+      return getStandalonesTotalsByMonthTool(String(args.month_query ?? ""));
+    case "list_standalones_active_in_month":
+      return listStandalonesActiveInMonthTool(String(args.month_query ?? ""));
     default:
       return { ok: false, reason: "not_found", message: `Tool desconocida: ${name}` };
   }
@@ -228,6 +320,18 @@ function buildListPayload(
       return r.projects && r.projects.length > 0 ? upcomingToListPayload(r.projects as never) : undefined;
     case "list_projects_at_risk":
       return r.projects && r.projects.length > 0 ? atRiskToListPayload(r.projects as never) : undefined;
+    case "list_feeds_active_in_month": {
+      const rr = result as { ok?: boolean; projects?: unknown[] };
+      return rr?.ok && rr.projects && rr.projects.length > 0
+        ? feedsActiveToListPayload(rr.projects as never, "Feeds activos")
+        : undefined;
+    }
+    case "list_standalones_active_in_month": {
+      const rr = result as { ok?: boolean; events?: unknown[] };
+      return rr?.ok && rr.events && rr.events.length > 0
+        ? standalonesActiveToListPayload(rr.events as never, "Standalones activos")
+        : undefined;
+    }
     default:
       return undefined;
   }

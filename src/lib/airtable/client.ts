@@ -49,22 +49,40 @@ function buildUrl(
   return url.toString();
 }
 
-async function request<T>(url: string, token: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      // Airtable data changes frequently; always read fresh.
-      cache: "no-store",
-    });
-  } catch (err) {
-    throw new AirtableError(
-      `Network error contacting Airtable: ${(err as Error).message}`,
-      0
-    );
-  }
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  if (!res.ok) {
+async function request<T>(url: string, token: string): Promise<T> {
+  const maxAttempts = 4;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        // Airtable data changes frequently; always read fresh.
+        cache: "no-store",
+      });
+    } catch (err) {
+      throw new AirtableError(
+        `Network error contacting Airtable: ${(err as Error).message}`,
+        0
+      );
+    }
+
+    if (res.ok) {
+      return (await res.json()) as T;
+    }
+
+    if (res.status === 429 && attempt < maxAttempts) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const waitMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : 500 * 2 ** (attempt - 1);
+      await sleep(waitMs);
+      continue;
+    }
+
     if (res.status === 401 || res.status === 403) {
       throw new AirtableError(
         "Airtable rejected the request (401/403). Check AIRTABLE_TOKEN scope/permissions.",
@@ -80,7 +98,7 @@ async function request<T>(url: string, token: string): Promise<T> {
     throw new AirtableError(`Airtable request failed with status ${res.status}`, res.status);
   }
 
-  return (await res.json()) as T;
+  throw new AirtableError("Airtable request failed after retries.", 429);
 }
 
 /** List all records in a table, transparently following Airtable pagination. */
@@ -138,10 +156,15 @@ export async function getRecordsByIds<TFields = Record<string, unknown>>(
   table: string,
   recordIds: string[]
 ): Promise<AirtableRecord<TFields>[]> {
-  const results = await Promise.all(
-    recordIds.map((id) => getRecordById<TFields>(table, id))
-  );
-  return results.filter((r): r is AirtableRecord<TFields> => r !== null);
+  const results: AirtableRecord<TFields>[] = [];
+
+  // Resolve linked records sequentially to stay below Airtable's request-rate limit.
+  for (const id of recordIds) {
+    const record = await getRecordById<TFields>(table, id);
+    if (record) results.push(record);
+  }
+
+  return results;
 }
 
 export type { AirtableRecord };

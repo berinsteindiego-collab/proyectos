@@ -1,13 +1,14 @@
 import { listRecords, isMockMode, type AirtableRecord } from "./client";
-import { EVENT_FIELDS, EVENTOS_TABLE } from "./fields";
+import { EVENT_FIELDS, EVENTOS_TABLE, TAREAS_TABLE } from "./fields";
 import { getTasksForEvent } from "./tasks";
-import { normalizeProject } from "../project-status/normalize";
+import { normalizeProject, toReadinessPercent } from "../project-status/normalize";
 import { searchMockProjects, findMockProjectById, listMockUpcoming } from "./mock-data";
 import {
   AmbiguousProjectError,
   ProjectNotFoundError,
   type ProjectSearchResult,
   type ProjectStatus,
+  type PortfolioStatusRow,
 } from "../project-status/types";
 
 function toSearchResult(record: AirtableRecord): ProjectSearchResult {
@@ -16,7 +17,7 @@ function toSearchResult(record: AirtableRecord): ProjectSearchResult {
     id: record.id,
     name: (f[EVENT_FIELDS.name] as string) ?? "(sin nombre)",
     status: f[EVENT_FIELDS.status] as string | undefined,
-    readiness: (f[EVENT_FIELDS.readiness] as number | undefined) ?? null,
+    readiness: toReadinessPercent(f[EVENT_FIELDS.readiness]) ?? null,
     daysToLaunch: (f[EVENT_FIELDS.daysToLaunch] as number | undefined) ?? null,
     startDate: (f[EVENT_FIELDS.startDate] as string | undefined) ?? null,
   };
@@ -137,13 +138,15 @@ export async function getProjectStatusById(recordId: string): Promise<ProjectSta
  */
 export async function listUpcomingProjects(limit = 10): Promise<ProjectSearchResult[]> {
   if (isMockMode()) {
-    return listMockUpcoming().slice(0, limit);
+    return listMockUpcoming()
+      .filter((p) => p.daysToLaunch != null && p.daysToLaunch >= 0)
+      .slice(0, limit);
   }
 
   const records = await listRecords(EVENTOS_TABLE);
   return records
     .map(toSearchResult)
-    .filter((p) => p.daysToLaunch != null)
+    .filter((p) => p.daysToLaunch != null && p.daysToLaunch >= 0)
     .sort((a, b) => (a.daysToLaunch ?? 0) - (b.daysToLaunch ?? 0))
     .slice(0, limit);
 }
@@ -181,4 +184,77 @@ export async function listProjectsAtRisk(limit = 10): Promise<ProjectSearchResul
     .map(toSearchResult)
     .filter((p) => isRiskStatus(p.status))
     .slice(0, limit);
+}
+
+
+/** Compact operational status by event category for portfolio-level chat views.
+ * Reads Estado General and task Estado values as-is from Airtable.
+ */
+export async function listPortfolioStatusByCategory(categoryQuery: string): Promise<PortfolioStatusRow[]> {
+  if (isMockMode()) return [];
+
+  const categoryNeedle = normalize(categoryQuery);
+
+  // Portfolio views need data from many projects at once. Fetch the two Airtable
+  // tables once and join them locally via Eventos.Tareas linked-record IDs.
+  // This avoids N x task-record API requests, Airtable 429s and Netlify timeouts.
+  const [records, allTasks] = await Promise.all([
+    listRecords(EVENTOS_TABLE),
+    listRecords(TAREAS_TABLE),
+  ]);
+
+  const matching = records.filter((record) => {
+    const category = normalize(String(record.fields[EVENT_FIELDS.category] ?? ""));
+    return category.includes(categoryNeedle);
+  });
+
+  const tasksById = new Map(allTasks.map((task) => [task.id, task]));
+
+  const rows: PortfolioStatusRow[] = matching.map((event) => {
+    const linkedTaskIds =
+      (event.fields[EVENT_FIELDS.tasks] as string[] | undefined) ?? [];
+    const eventTasks = linkedTaskIds
+      .map((id) => tasksById.get(id))
+      .filter((task): task is AirtableRecord => Boolean(task));
+
+    const project = normalizeProject(event, eventTasks);
+    const taskStatus = (matcher: (name: string) => boolean) =>
+      project.tasks.find((task) => matcher(normalize(task.name)))?.status ?? null;
+
+    return {
+      id: project.project.id,
+      name: project.project.name,
+      startDate: project.project.startDate ?? null,
+      status: project.project.status,
+      testDssStatus: taskStatus(
+        (name) => name.includes("dss") && name.includes("senal") && name.includes("test")
+      ),
+      epgStatus: taskStatus(
+        (name) => name === "estado epg" || (name.includes("epg") && name.includes("estado"))
+      ),
+      territoryStatus: taskStatus(
+        (name) => name === "territory" || name.includes("territory")
+      ),
+    };
+  });
+
+  const statusRank = (status?: string) => {
+    const value = normalize(status ?? "");
+    if (value.includes("at risk")) return 1;
+    if (value.includes("risk") || value.includes("riesgo")) return 0;
+    if (value.includes("in progress")) return 2;
+    if (value.includes("planning")) return 3;
+    return 4;
+  };
+
+  return rows
+    .filter((row) => !normalize(row.status ?? "").includes("ready"))
+    .sort((a, b) => {
+      const rankDiff = statusRank(a.status) - statusRank(b.status);
+      if (rankDiff !== 0) return rankDiff;
+      if (!a.startDate && !b.startDate) return a.name.localeCompare(b.name);
+      if (!a.startDate) return 1;
+      if (!b.startDate) return -1;
+      return a.startDate.localeCompare(b.startDate);
+    });
 }

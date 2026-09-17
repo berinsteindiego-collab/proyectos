@@ -11,6 +11,7 @@ import type {
   ProjectTask,
   UrgencyTone,
 } from "@/lib/project-status/types";
+import type { FeedsActiveProject, StandalonesActiveEvent } from "@/lib/ops/types";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -81,6 +82,40 @@ export function atRiskToListPayload(projects: ProjectSearchResult[]): ListPayloa
       title: p.name,
       subtitle: p.readiness != null ? `Launch Readiness ${p.readiness}%` : undefined,
       badge: { label: p.status ?? "En riesgo", tone: "red" as UrgencyTone },
+    })),
+  };
+}
+
+// --- Phase 3: Feeds Roll Out / Standalones ---
+// Same card shape as the project/task lists above, built directly from
+// Airtable-sourced data so the UI renders identical cards regardless of
+// which path (rule-based or Groq) answered the question.
+
+export function feedsActiveToListPayload(projects: FeedsActiveProject[], heading: string): ListPayload {
+  return {
+    heading,
+    items: projects.map((p) => ({
+      id: p.id,
+      title: p.project,
+      subtitle: [p.country, p.type].filter(Boolean).join(" · ") || undefined,
+      badge: { label: `${p.qFeeds} feeds`, tone: "blue" as UrgencyTone },
+      meta: [p.status, p.adHoc].filter((v): v is string => !!v),
+    })),
+  };
+}
+
+export function standalonesActiveToListPayload(
+  events: StandalonesActiveEvent[],
+  heading: string
+): ListPayload {
+  return {
+    heading,
+    items: events.map((e) => ({
+      id: e.id,
+      title: e.eventName,
+      subtitle: e.reference,
+      badge: { label: `${e.events} eventos`, tone: "blue" as UrgencyTone },
+      meta: [e.type].filter((v): v is string => !!v),
     })),
   };
 }

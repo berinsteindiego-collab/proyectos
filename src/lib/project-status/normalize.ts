@@ -1,6 +1,6 @@
 import type { AirtableRecord } from "../airtable/client";
 import { EVENT_FIELDS, TASK_FIELDS } from "../airtable/fields";
-import type { ProjectStatus, ProjectTask } from "./types";
+import { TERMINAL_TASK_STATUSES, type ProjectStatus, type ProjectTask } from "./types";
 
 function str(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -12,6 +12,18 @@ function num(value: unknown): number | undefined {
 
 function bool(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+/**
+ * Airtable's "Launch Readiness" is a Percent-type field: its API value is
+ * the raw fraction (e.g. 0.9032258064516129 for 90%), not the number shown
+ * in the Airtable UI. Converts it to a whole-number percentage for display,
+ * without changing what the field actually measures.
+ */
+export function toReadinessPercent(value: unknown): number | undefined {
+  const n = num(value);
+  if (n == null) return undefined;
+  return Math.round(n * 100);
 }
 
 /**
@@ -75,14 +87,17 @@ export function normalizeProject(
       startDate: str(f[EVENT_FIELDS.startDate]) ?? null,
       endDate: str(f[EVENT_FIELDS.endDate]) ?? null,
       status: str(f[EVENT_FIELDS.status]),
-      readiness: num(f[EVENT_FIELDS.readiness]) ?? null,
+      readiness: toReadinessPercent(f[EVENT_FIELDS.readiness]) ?? null,
       daysToLaunch: num(f[EVENT_FIELDS.daysToLaunch]) ?? null,
       description: str(f[EVENT_FIELDS.description]),
     },
     summary: {
       totalTasks,
       completedTasks,
-      pendingTasks: Math.max(totalTasks - completedTasks, 0),
+      // Counts genuinely open work only: excludes Done AND terminal
+      // non-work statuses (Cancelled, Wont do), so those don't inflate
+      // "pending" the way a plain totalTasks - completedTasks would.
+      pendingTasks: tasks.filter((t) => !TERMINAL_TASK_STATUSES.has(t.status as never)).length,
       openBlockers: num(f[EVENT_FIELDS.openBlockers]),
       overdueBlockers: num(f[EVENT_FIELDS.overdueBlockers]),
     },

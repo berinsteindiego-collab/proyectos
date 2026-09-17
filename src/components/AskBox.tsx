@@ -5,7 +5,16 @@ import ProjectBrief from "@/components/ProjectBrief";
 import ProjectStatusDashboard from "@/components/ProjectStatusDashboard";
 import TaskTable from "@/components/TaskTable";
 import ListCards from "@/components/ListCards";
-import type { ListPayload, ProjectSearchResult, ProjectStatus } from "@/lib/project-status/types";
+import LiveSnapshot, { type LiveSnapshotData } from "@/components/LiveSnapshot";
+import PortfolioStatusTable from "@/components/PortfolioStatusTable";
+import type { ListPayload, PortfolioStatusPayload, ProjectSearchResult, ProjectStatus } from "@/lib/project-status/types";
+
+interface BriefAction {
+  label: string;
+  reply?: string;
+  list?: ListPayload;
+  query?: string;
+}
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -13,52 +22,72 @@ interface ChatMessage {
   matches?: ProjectSearchResult[];
   status?: ProjectStatus;
   list?: ListPayload;
+  live?: LiveSnapshotData;
+  portfolioStatus?: PortfolioStatusPayload;
+  briefActions?: BriefAction[];
+  projectName?: string;
 }
 
-/** Contextual follow-up chips shown under the latest assistant answer. */
+const EXAMPLES = [
+  "Dame el resumen de hoy",
+  "¿Qué eventos vienen?",
+  "¿Cómo viene La Granja?",
+  "¿Cuántos standalones llevamos este año?",
+  "¿Cuántos usuarios están viendo La Granja?",
+];
+
+const LIVE_WORDS = /\b(viewers?|usuarios?|concurrentes?|viendo|audiencia|pa[ií]ses?|dispositivos?|devices?|live)\b/i;
+const DAILY_BRIEF = /^(?:dame\s+)?(?:el\s+)?resumen\s+de\s+hoy[.!?¡¿]*$/i;
+const RISK_REASON =
+  /\b(?:(?:por\s+qu[eé]|porque)\b.*\b(?:riesgos?|risk)\b|(?:qu[eé]|cu[aá]les?)\s+riesgos?\s+tiene\b|riesgos?\s+(?:de|del|en)\b|qu[eé]\s+(?:pone|deja)\s+(?:en\s+)?riesgo\b|cu[aá]l\s+es\s+(?:el\s+)?riesgo\s+(?:de|del|en)\b|(?:riesgos?|risk)\b.*\b(?:por\s+qu[eé]|porque)\b)/i;
+const PROJECT_FOLLOW_UP =
+  /^(?:qu[eé]\s+falta|qu[eé]\s+queda|qu[eé]\s+est[aá]\s+pendiente|qu[eé]\s+est[aá]\s+vencido|qu[eé]\s+venci[oó]|qu[eé]\s+est[aá]\s+bloqueado|qu[eé]\s+bloquea|pr[oó]ximos?\s+deadlines?|cu[aá]les?\s+son\s+(?:esas?|las?)\s+tareas?|qu[eé]\s+tareas?\s+son|mostr[aá]melas?|mostrame(?:\s+(?:esas?|las?)\s+tareas?)?|qui[eé]n(?:es)?\s+(?:es|son)\s+(?:el|los|la|las)?\s*responsables?|cu[aá]ndo\s+vencieron|qu[eé]\s+falta\s+hacer|cu[aá]les?\s+son\s+(?:los\s+)?riesgos?|qu[eé]\s+riesgos?\s+tiene|qu[eé]\s+riesgo\s+tiene|por\s+qu[eé]\s+est[aá]\s+en\s+riesgo)[.!?¡¿]*$/i;
+const HISTORY_KEY = "project-control-recent-questions";
+
 function suggestionsFor(m: ChatMessage): string[] {
+  if (m.live) return [`¿De qué países están viendo ${m.live.titleQuery}?`, `¿En qué dispositivos se ve ${m.live.titleQuery}?`, `¿Qué títulos de ${m.live.titleQuery} tienen más audiencia?`];
   if (m.status) {
     const name = m.status.project.name;
     return [`¿Qué falta en ${name}?`, `¿Qué está vencido en ${name}?`, `Próximos deadlines de ${name}`];
   }
-  if (m.list) {
-    return ["¿Qué proyectos están en riesgo?", "¿Qué eventos vienen?"];
-  }
+  if (m.list) return ["¿Qué proyectos están en riesgo?", "¿Qué eventos vienen?"];
   return [];
 }
 
-const EXAMPLES = [
-  "¿Cómo está Telefe?",
-  "¿Qué eventos vienen?",
-  "¿Qué proyectos están en riesgo?",
-  "¿Qué está vencido en La Granja VIP 2?",
-];
-
 function MicIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm6-3a6 6 0 0 1-12 0M12 18v3"
-      />
-    </svg>
-  );
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm6-3a6 6 0 0 1-12 0M12 18v3" /></svg>;
 }
-
 function SendIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M14 6l6 6-6 6" />
-    </svg>
-  );
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M14 6l6 6-6 6" /></svg>;
+}
+function CopyIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
 }
 
-/** Picks a MediaRecorder mime type the current browser actually supports. */
 function pickAudioMimeType(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
-  return candidates.find((type) => MediaRecorder.isTypeSupported?.(type));
+  return ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"].find((type) => MediaRecorder.isTypeSupported?.(type));
+}
+
+function cleanLiveTitle(text: string): string {
+  return text.replace(/[¿?¡!.,;:]+$/g, "").replace(/\b(ahora|en vivo|live)\s*$/i, "").replace(/\s+/g, " ").trim();
+}
+
+function extractLiveTitle(text: string): string {
+  const cleaned = text.replace(/[¿?¡!]/g, " ").replace(/\s+/g, " ").trim();
+  const patterns = [
+    /\b(?:est[aá]n\s+)?viendo\s+(.+)$/i,
+    /\b(?:se\s+)?ve\s+(.+)$/i,
+    /\bver\s+(.+)$/i,
+    /\b(?:audiencia|usuarios?|viewers?|concurrentes?)\b.*?\b(?:de|en)\s+(.+)$/i,
+    /\b(?:pa[ií]ses?|dispositivos?|devices?)\b.*?\b(?:de|en)\s+(.+)$/i,
+    /\bt[ií]tulos?\b.*?\bde\s+(.+)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match?.[1]) return cleanLiveTitle(match[1]);
+  }
+  return cleanLiveTitle(cleaned.replace(/\b(cu[aá]ntos?|cu[aá]ntas?|usuarios?|viewers?|concurrentes?|hay|est[aá]n?|viendo|ven|ver|se|ve|qu[eé]|pa[ií]ses?|dispositivos?|devices?|ahora|live|audiencia|principal|m[aá]s|t[ií]tulos?)\b/gi, " ").replace(/\s+/g, " ").trim());
 }
 
 export default function AskBox() {
@@ -66,68 +95,114 @@ export default function AskBox() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  const [recent, setRecent] = useState<string[]>([]);
   const [micSupported, setMicSupported] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [activeProject, setActiveProject] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setMicSupported(
-      typeof navigator !== "undefined" &&
-        !!navigator.mediaDevices?.getUserMedia &&
-        typeof MediaRecorder !== "undefined"
-    );
+    setMicSupported(typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined");
+    try { setRecent(JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]")); } catch { setRecent([]); }
   }, []);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading, transcribing]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading, transcribing]);
+  function remember(text: string) {
+    const next = [text, ...recent.filter((q) => q !== text)].slice(0, 5);
+    setRecent(next);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+  }
+
+  function openBriefAction(action: BriefAction) {
+    if (action.query) {
+      void sendText(action.query);
+      return;
+    }
+    if (!action.list) return;
+    const label = action.label.replace(/\s*\(\d+\)\s*$/, "");
+    setMessages((current) => [
+      ...current,
+      { role: "user", content: label },
+      { role: "assistant", content: action.reply ?? label, list: action.list },
+    ]);
+  }
+
+  function contextualizeProjectFollowUp(text: string): string {
+    if (!activeProject || !PROJECT_FOLLOW_UP.test(text.trim())) return text;
+
+    const normalized = text.trim().replace(/[¿?¡!.,;:]+/g, "").toLowerCase();
+
+    if (/riesgo/i.test(normalized)) return `¿Qué riesgos tiene ${activeProject}?`;
+    if (/vencid|venci[oó]/i.test(normalized)) return `¿Qué está vencido en ${activeProject}?`;
+    if (/bloque/i.test(normalized)) return `¿Qué está bloqueado en ${activeProject}?`;
+    if (/deadline/i.test(normalized)) return `Próximos deadlines de ${activeProject}`;
+    if (/responsable/i.test(normalized)) return `¿Qué falta en ${activeProject}?`;
+    if (/tareas?|mostr[aá]melas?|falta|queda|pendiente/i.test(normalized)) return `¿Qué falta en ${activeProject}?`;
+
+    return text;
+  }
 
   async function sendText(text: string) {
     if (!text || loading) return;
-
+    remember(text);
     const next = [...messages, { role: "user" as const, content: text }];
-    setMessages(next);
-    setInput("");
-    setLoading(true);
-    setError(null);
+    const routedText = contextualizeProjectFollowUp(text);
+    setMessages(next); setInput(""); setLoading(true); setError(null);
 
     try {
+      if (DAILY_BRIEF.test(text.trim())) {
+        const briefRes = await fetch("/api/brief", { cache: "no-store" });
+        const briefBody = await briefRes.json();
+        if (!briefRes.ok) throw new Error(briefBody.error ?? "No se pudo generar el resumen de hoy.");
+        setMessages([...next, { role: "assistant", content: briefBody.reply, briefActions: briefBody.actions }]);
+        return;
+      }
+
+      if (RISK_REASON.test(routedText.trim())) {
+        const riskRes = await fetch(`/api/risk-reason?q=${encodeURIComponent(routedText)}`, { cache: "no-store" });
+        const riskBody = await riskRes.json();
+        if (!riskRes.ok) throw new Error(riskBody.error ?? "No se pudo explicar el riesgo del proyecto.");
+        if (riskBody.projectName) setActiveProject(riskBody.projectName);
+        setMessages([...next, { role: "assistant", content: riskBody.reply, matches: riskBody.matches, list: riskBody.list, projectName: riskBody.projectName }]);
+        return;
+      }
+
+      if (LIVE_WORDS.test(routedText)) {
+        const title = extractLiveTitle(routedText);
+        if (title) {
+          const liveRes = await fetch(`/api/live?title=${encodeURIComponent(title)}`);
+          const liveBody = await liveRes.json();
+          if (!liveRes.ok) throw new Error(liveBody.error ?? "No se pudo consultar Conviva.");
+          const live = liveBody.live as LiveSnapshotData;
+          const reply = live.matchedAssets.length ? `Encontré ${live.concurrentPlays.toLocaleString("es-AR")} usuarios concurrentes para títulos que contienen “${title}”.` : `No encontré sesiones activas para títulos que contengan “${title}”.`;
+          setMessages([...next, { role: "assistant", content: reply, live }]);
+          return;
+        }
+      }
+
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next.map((m) => ({ role: m.role, content: m.content })) }),
+        body: JSON.stringify({
+          messages: next.map((m, index) => ({
+            role: m.role,
+            content: index === next.length - 1 && m.role === "user" ? routedText : m.content,
+          })),
+        }),
       });
       const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.error ?? "Error desconocido");
-      }
-      setMessages([
-        ...next,
-        {
-          role: "assistant",
-          content: body.reply as string,
-          matches: body.matches as ProjectSearchResult[] | undefined,
-          status: body.status as ProjectStatus | undefined,
-          list: body.list as ListPayload | undefined,
-        },
-      ]);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
+      if (!res.ok) throw new Error(body.error ?? "Error desconocido");
+      if (body.status?.project?.name) setActiveProject(body.status.project.name);
+      setMessages([...next, { role: "assistant", content: body.reply, matches: body.matches, status: body.status, list: body.list, portfolioStatus: body.portfolioStatus, projectName: body.status?.project?.name }]);
+    } catch (err) { setError((err as Error).message); }
+    finally { setLoading(false); }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendText(input.trim());
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(input.trim()); }
   }
 
   async function startRecording() {
@@ -138,183 +213,67 @@ export default function AskBox() {
       const mimeType = pickAudioMimeType();
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       chunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" });
-        await transcribeAndFill(blob);
+        setTranscribing(true);
+        try {
+          const formData = new FormData(); formData.append("audio", blob, "audio.webm");
+          const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.error ?? "No se pudo transcribir el audio.");
+          if (body.text) await sendText(body.text); else setError("No entendí el audio, ¿podés intentar de nuevo?");
+        } catch (err) { setError((err as Error).message); } finally { setTranscribing(false); }
       };
-
-      recorder.start();
-      recorderRef.current = recorder;
-      setRecording(true);
-    } catch {
-      setError("No pude acceder al micrófono. Revisá los permisos del navegador.");
-    }
+      recorder.start(); recorderRef.current = recorder; setRecording(true);
+    } catch { setError("No pude acceder al micrófono. Revisá los permisos del navegador."); }
   }
-
-  function stopRecording() {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    setRecording(false);
-  }
-
-  async function transcribeAndFill(blob: Blob) {
-    setTranscribing(true);
-    setError(null);
-    try {
-      const formData = new FormData();
-      formData.append("audio", blob, "audio.webm");
-      const res = await fetch("/api/transcribe", { method: "POST", body: formData });
-      const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.error ?? "No se pudo transcribir el audio.");
-      }
-      const text = (body.text as string) ?? "";
-      if (text) {
-        sendText(text);
-      } else {
-        setError("No entendí el audio, ¿podés intentar de nuevo?");
-      }
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setTranscribing(false);
-    }
-  }
-
   function toggleRecording() {
-    if (recording) stopRecording();
+    if (recording) { recorderRef.current?.stop(); recorderRef.current = null; setRecording(false); }
     else startRecording();
   }
 
-  const empty = messages.length === 0;
+  async function copyAnswer(text: string) {
+    try { await navigator.clipboard.writeText(text); } catch { setError("No pude copiar la respuesta."); }
+  }
 
+  const empty = messages.length === 0;
   return (
     <div className="flex flex-col">
       {empty ? (
-        <div className="py-10 text-center">
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Preguntame sobre un proyecto</h1>
-          <p className="mx-auto mt-2 max-w-md text-sm text-slate-500 dark:text-slate-400">
-            Escribí o dictá el nombre de un proyecto (puede ser parcial) o hacé una pregunta con tus
-            propias palabras.
-          </p>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                onClick={() => sendText(ex)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:text-indigo-400"
-              >
-                {ex}
-              </button>
-            ))}
-          </div>
+        <div className="py-6 text-center sm:py-8">
+          <div className="mx-auto inline-flex rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">Project Control AI</div>
+          <h1 className="mt-3 text-xl font-semibold text-slate-900 sm:text-2xl dark:text-slate-100">Preguntale a Project Control</h1>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">Consultá proyectos, próximos eventos, deadlines, feeds, standalones y audiencia en vivo con tus propias palabras.</p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{EXAMPLES.map((ex) => <button key={ex} onClick={() => sendText(ex)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{ex}</button>)}</div>
+          {recent.length > 0 && <div className="mx-auto mt-6 max-w-2xl border-t border-slate-100 pt-4 text-left dark:border-slate-800"><p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recientes</p><div className="flex flex-wrap gap-2">{recent.slice(0, 4).map((q) => <button key={q} onClick={() => sendText(q)} className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800">↻ {q}</button>)}</div></div>}
         </div>
       ) : (
         <div className="flex-1 space-y-4 overflow-y-auto pb-4">
           {messages.map((m, i) => (
             <div key={i} className={m.role === "user" ? "flex justify-end" : "flex flex-col gap-3"}>
-              {m.role === "user" ? (
-                <div className="max-w-[85%] rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white dark:bg-indigo-600">
-                  {m.content}
-                </div>
-              ) : (
-                <>
-                  <div
-                    className="max-w-[85%] rounded-2xl bg-white px-4 py-2 text-sm text-slate-800 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-800"
-                    style={{ whiteSpace: "pre-wrap" }}
-                  >
-                    {m.content}
-                  </div>
-                  {m.matches && m.matches.length > 0 && (
-                    <div className="flex max-w-[85%] flex-wrap gap-2">
-                      {m.matches.map((match) => (
-                        <button
-                          key={match.id}
-                          onClick={() => sendText(match.name)}
-                          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-indigo-500 dark:hover:text-indigo-400"
-                        >
-                          {match.name}
-                          {match.status && <span className="ml-1.5 text-slate-400 dark:text-slate-500">({match.status})</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {m.list && <ListCards list={m.list} />}
-                  {m.status && (
-                    <div className="max-w-full space-y-4">
-                      <ProjectBrief status={m.status} />
-                      <ProjectStatusDashboard status={m.status} />
-                      <TaskTable tasks={m.status.tasks} />
-                    </div>
-                  )}
-                  {i === messages.length - 1 &&
-                    !loading &&
-                    (() => {
-                      const suggestions = suggestionsFor(m);
-                      return suggestions.length > 0 ? (
-                        <div className="flex max-w-[85%] flex-wrap gap-2">
-                          {suggestions.map((s) => (
-                            <button
-                              key={s}
-                              onClick={() => sendText(s)}
-                              className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm hover:border-indigo-300 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-950/70"
-                            >
-                              {s}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null;
-                    })()}
-                </>
-              )}
+              {m.role === "user" ? <div className="max-w-[92%] rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white sm:max-w-[85%] dark:bg-indigo-600">{m.content}</div> : <>
+                <div className="group max-w-full rounded-2xl bg-white px-4 py-3 text-sm text-slate-800 shadow-sm ring-1 ring-slate-100 sm:max-w-[85%] dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-800"><div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div><button onClick={() => copyAnswer(m.content)} className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-600"><CopyIcon /> Copiar resumen</button></div>
+                {m.briefActions && m.briefActions.length > 0 && <div className="flex max-w-full flex-col gap-2 sm:max-w-[85%] sm:flex-row sm:flex-wrap">{m.briefActions.map((action) => <button key={action.label} onClick={() => openBriefAction(action)} className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-left text-xs font-medium text-indigo-700 shadow-sm transition hover:bg-indigo-100 sm:rounded-full sm:py-1.5 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">{action.label}</button>)}</div>}
+                {m.matches && m.matches.length > 0 && <div className="flex max-w-full flex-wrap gap-2 sm:max-w-[85%]">{m.matches.map((match) => <button key={match.id} onClick={() => sendText(match.name)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{match.name}</button>)}</div>}
+                {m.list && <ListCards list={m.list} />}
+                {m.live && <LiveSnapshot live={m.live} />}
+                {m.portfolioStatus && <PortfolioStatusTable data={m.portfolioStatus} onProjectClick={(name) => sendText(name)} onRiskClick={(name) => sendText(`¿Por qué está en riesgo ${name}?`)} />}
+                {m.status && <div className="max-w-full space-y-4"><ProjectBrief status={m.status} /><ProjectStatusDashboard status={m.status} /><TaskTable tasks={m.status.tasks} /></div>}
+                {i === messages.length - 1 && !loading && <div className="flex max-w-full flex-wrap gap-2 sm:max-w-[85%]">{suggestionsFor(m).map((s) => <button key={s} onClick={() => sendText(s)} className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">{s}</button>)}</div>}
+              </>}
             </div>
           ))}
-          {loading && <p className="text-sm text-slate-400 dark:text-slate-500">Pensando...</p>}
+          {loading && <p className="text-sm text-slate-400">Analizando...</p>}
           <div ref={bottomRef} />
         </div>
       )}
-
-      {error && (
-        <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-400">{error}</p>
-      )}
-
+      {error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-400">{error}</p>}
       <div className="sticky bottom-0 flex items-end gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={1}
-          placeholder={recording ? "Escuchando..." : transcribing ? "Transcribiendo..." : "Ej: La Granja VIP 2: México, o \"qué falta en Telefe\"..."}
-          disabled={recording || transcribing}
-          className="max-h-32 flex-1 resize-none rounded-xl border-none bg-transparent px-2 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
-        />
-        {micSupported && (
-          <button
-            onClick={toggleRecording}
-            disabled={transcribing || loading}
-            title={recording ? "Detener grabación" : "Preguntar por voz"}
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 ${
-              recording
-                ? "animate-pulse bg-red-500 text-white"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            }`}
-          >
-            <MicIcon />
-          </button>
-        )}
-        <button
-          onClick={() => sendText(input.trim())}
-          disabled={loading || recording || transcribing || !input.trim()}
-          title="Enviar"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition hover:bg-indigo-500 disabled:opacity-40"
-        >
-          <SendIcon />
-        </button>
+        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} rows={1} placeholder={recording ? "Escuchando..." : transcribing ? "Transcribiendo..." : "Preguntá por un proyecto, evento, audiencia, feeds o standalones..."} disabled={recording || transcribing} className="max-h-32 flex-1 resize-none rounded-xl border-none bg-transparent px-2 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-200" />
+        {micSupported && <button onClick={toggleRecording} disabled={transcribing} aria-label={recording ? "Detener grabación" : "Hablar"} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition ${recording ? "animate-pulse bg-red-500 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"}`}><MicIcon /></button>}
+        <button onClick={() => sendText(input.trim())} disabled={!input.trim() || loading || recording || transcribing} aria-label="Enviar" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-white transition hover:bg-indigo-600 disabled:opacity-40"><SendIcon /></button>
       </div>
     </div>
   );
