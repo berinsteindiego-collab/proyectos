@@ -437,6 +437,32 @@ export async function runQc({
   const SERIES = seriesResult.visuals?.title ?? searchTitle;
   const seriesEntity = seriesResult.id;
 
+  // Capturamos las respuestas de la API de Explore que dispara la
+  // propia página al cargar. Sirve para resolver el Season ID sin
+  // depender del selector de temporada clickeable — shows con una
+  // sola temporada no lo muestran (no hay nada entre qué elegir).
+  const entityPageJsonBodies = [];
+
+  page.on("response", (response) => {
+    (async () => {
+      const respUrl = response.url();
+
+      if (!respUrl.includes("disney.api.edge.bamgrid.com/explore/")) {
+        return;
+      }
+
+      const contentType = response.headers()["content-type"] ?? "";
+
+      if (!contentType.includes("json")) return;
+
+      const body = await response.json().catch(() => null);
+
+      if (body) entityPageJsonBodies.push(body);
+    })().catch((error) => {
+      console.error("entity page response listener error:", error);
+    });
+  });
+
   await page.goto(
     disneyUrl(marketConfig.webPath, `browse/entity-${seriesEntity}`),
     { waitUntil: "domcontentloaded" }
@@ -536,55 +562,75 @@ export async function runQc({
       await dismissDisneyPopup(page);
     }
 
-    const seasonWordPattern = new RegExp(
-      `${marketConfig.seasonWord}\\s*\\d+`,
-      "i"
-    );
-
-    const seasonButton = page
-      .locator('button[aria-haspopup="listbox"]')
-      .filter({ hasText: seasonWordPattern })
-      .last();
-
-    try {
-      await seasonButton.waitFor({ state: "visible", timeout: 30000 });
-    } catch (error) {
-      // Diagnóstico: si no aparece el selector de temporada, mostramos
-      // qué URL/texto quedó realmente en pantalla (perfil, popup
-      // distinto, contenido no encontrado, etc.) en vez de solo
-      // "timeout".
-      const debugUrl = page.url();
-      let bodySnippet = "";
-
-      try {
-        bodySnippet = (await page.textContent("body"))?.slice(0, 400) ?? "";
-      } catch {
-        // Ignorar si tampoco se puede leer el body.
-      }
-
-      throw new Error(
-        `No apareció el selector de temporada. url=${debugUrl} ` +
-        `body="${bodySnippet.replace(/\s+/g, " ").trim()}"`
-      );
-    }
-
-    await seasonButton.click();
-
-    const seasonOption = page.locator(
-      `li[role="option"][title="${marketConfig.seasonWord} ${seasonNumber}"]`
-    );
-
-    await seasonOption.waitFor({ state: "visible", timeout: 20000 });
-
-    const seasonId = await seasonOption.getAttribute("id");
+    // 1) Intentamos resolver el Season ID de las respuestas de API que
+    // ya capturamos, sin clickear nada. Shows con una sola temporada
+    // no tienen selector clickeable, así que esto es necesario para
+    // esos casos y evita depender del DOM para el resto.
+    let seasonId = findSeasonId(entityPageJsonBodies, seasonNumber);
 
     if (!seasonId) {
-      throw new Error(
-        `${marketConfig.seasonWord} ${seasonNumber} no tiene Season ID.`
-      );
+      const apiDeadline = Date.now() + 8000;
+
+      while (!seasonId && Date.now() < apiDeadline) {
+        await page.waitForTimeout(500);
+        seasonId = findSeasonId(entityPageJsonBodies, seasonNumber);
+      }
     }
 
-    await seasonButton.click().catch(() => {});
+    // 2) Fallback: shows con más de una temporada exponen un selector
+    // clickeable (button[aria-haspopup="listbox"]) — lo usamos solo
+    // si el paso anterior no encontró nada.
+    if (!seasonId) {
+      const seasonWordPattern = new RegExp(
+        `${marketConfig.seasonWord}\\s*\\d+`,
+        "i"
+      );
+
+      const seasonButton = page
+        .locator('button[aria-haspopup="listbox"]')
+        .filter({ hasText: seasonWordPattern })
+        .last();
+
+      try {
+        await seasonButton.waitFor({ state: "visible", timeout: 15000 });
+      } catch (error) {
+        // Diagnóstico: si no aparece ni el selector ni lo resolvimos
+        // por API, mostramos qué URL/texto quedó realmente en
+        // pantalla (perfil, popup distinto, contenido no encontrado,
+        // etc.) en vez de solo "timeout".
+        const debugUrl = page.url();
+        let bodySnippet = "";
+
+        try {
+          bodySnippet = (await page.textContent("body"))?.slice(0, 400) ?? "";
+        } catch {
+          // Ignorar si tampoco se puede leer el body.
+        }
+
+        throw new Error(
+          `No pude resolver la temporada ${seasonNumber} (ni por API ni por selector). ` +
+          `url=${debugUrl} body="${bodySnippet.replace(/\s+/g, " ").trim()}"`
+        );
+      }
+
+      await seasonButton.click();
+
+      const seasonOption = page.locator(
+        `li[role="option"][title="${marketConfig.seasonWord} ${seasonNumber}"]`
+      );
+
+      await seasonOption.waitFor({ state: "visible", timeout: 20000 });
+
+      seasonId = await seasonOption.getAttribute("id");
+
+      if (!seasonId) {
+        throw new Error(
+          `${marketConfig.seasonWord} ${seasonNumber} no tiene Season ID.`
+        );
+      }
+
+      await seasonButton.click().catch(() => {});
+    }
 
     const seasonBaseUrl =
       `https://disney.api.edge.bamgrid.com/explore/v1.18/season/${seasonId}`;
