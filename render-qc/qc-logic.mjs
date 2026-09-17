@@ -87,6 +87,22 @@ function normalizeTitle(value) {
     .trim();
 }
 
+// El logo/title treatment muchas veces omite números de secuela o
+// subtítulos que sí están en el título de metadata (ej: el logo dice
+// "EL DIABLO VISTE A LA MODA" pero el título real es "El diablo viste
+// a la moda 2"). Ya normalizamos mayúsculas/acentos en normalizeTitle;
+// acá alcanza con que uno contenga al otro como texto completo, no
+// que sean idénticos carácter por carácter.
+function titlesMatch(metadataNormalized, logoNormalized) {
+  if (!metadataNormalized || !logoNormalized) return false;
+
+  return (
+    metadataNormalized === logoNormalized ||
+    metadataNormalized.includes(logoNormalized) ||
+    logoNormalized.includes(metadataNormalized)
+  );
+}
+
 async function dismissDisneyPopup(page) {
   const okButton = page.getByRole("button", { name: /^OK$/i });
 
@@ -589,7 +605,7 @@ export async function runQc({
         logoText,
         match:
           logoText.toUpperCase() !== "UNKNOWN" &&
-          metadataNormalized === logoNormalized,
+          titlesMatch(metadataNormalized, logoNormalized),
       };
     } catch (error) {
       titleTreatmentResult = {
