@@ -119,14 +119,32 @@ const server = http.createServer(async (req, res) => {
 
       let disneyApiHeaders = null;
 
+      // Diagnóstico: cualquier request/response relevante a Disney/BAM,
+      // y cualquier error de consola/página. Nos sirve para ver *qué*
+      // está pasando cuando no se captura el authorization header.
+      const bamRequests = [];
+      const consoleErrors = [];
+      const pageErrors = [];
+
       page.on("request", async (request) => {
-        if (disneyApiHeaders) return;
+        const reqUrl = request.url();
 
         if (
-          !request
-            .url()
-            .includes("disney.api.edge.bamgrid.com/explore/")
+          reqUrl.includes("bamgrid.com") ||
+          reqUrl.includes("disneyplus.com/graphql") ||
+          reqUrl.includes("execute-api")
         ) {
+          bamRequests.push({
+            url: reqUrl,
+            hasAuth: Boolean(
+              (await request.allHeaders()).authorization
+            ),
+          });
+        }
+
+        if (disneyApiHeaders) return;
+
+        if (!reqUrl.includes("disney.api.edge.bamgrid.com/explore/")) {
           return;
         }
 
@@ -139,6 +157,31 @@ const server = http.createServer(async (req, res) => {
         }
       });
 
+      page.on("response", (response) => {
+        const resUrl = response.url();
+
+        if (
+          resUrl.includes("bamgrid.com") &&
+          response.status() >= 400
+        ) {
+          bamRequests.push({
+            url: resUrl,
+            status: response.status(),
+            error: true,
+          });
+        }
+      });
+
+      page.on("console", (msg) => {
+        if (msg.type() === "error") {
+          consoleErrors.push(msg.text().slice(0, 300));
+        }
+      });
+
+      page.on("pageerror", (error) => {
+        pageErrors.push(String(error).slice(0, 300));
+      });
+
       await page.goto(
         `https://www.disneyplus.com/${config.webPath}/home`,
         {
@@ -147,7 +190,7 @@ const server = http.createServer(async (req, res) => {
         }
       );
 
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(6000);
 
       if (!disneyApiHeaders) {
         await page.reload({
@@ -155,10 +198,17 @@ const server = http.createServer(async (req, res) => {
           timeout: 60000,
         });
 
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(6000);
       }
 
       const finalUrl = page.url();
+
+      let screenshotBase64 = null;
+
+      if (url.searchParams.get("debug") === "1") {
+        const buffer = await page.screenshot({ type: "jpeg", quality: 40 });
+        screenshotBase64 = buffer.toString("base64");
+      }
 
       await context.close();
 
@@ -172,6 +222,10 @@ const server = http.createServer(async (req, res) => {
         ),
         disneyExploreAuthorizationCaptured:
           Boolean(disneyApiHeaders),
+        bamRequests: bamRequests.slice(0, 20),
+        consoleErrors: consoleErrors.slice(0, 10),
+        pageErrors: pageErrors.slice(0, 10),
+        screenshotBase64,
       });
     } catch (error) {
       return sendJson(res, 500, {
