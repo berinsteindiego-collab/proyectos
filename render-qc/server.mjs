@@ -1,6 +1,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import { chromium } from "playwright";
+import { MARKETS as QC_MARKETS, runQc } from "./qc-logic.mjs";
 
 const port = Number(process.env.PORT || 10000);
 
@@ -24,25 +25,9 @@ process.on("uncaughtException", (error) => {
 // disponible en runtime en /etc/secrets/<filename>.
 const SECRETS_DIR = "/etc/secrets";
 
-const MARKETS = {
-  ARG: {
-    locale: "es-419",
-    webPath: "es-419",
-    secretFile: "disney-arg-storage-state.json",
-  },
-
-  MX: {
-    locale: "es-419",
-    webPath: "es-419",
-    secretFile: "disney-mx-storage-state.json",
-  },
-
-  BR: {
-    locale: "pt-BR",
-    webPath: "pt-br",
-    secretFile: "disney-br-storage-state.json",
-  },
-};
+// Una sola fuente de verdad para los 3 mercados (locale, webPath,
+// nombre del secret file, y qcRegion/label que usa la lógica de QC).
+const MARKETS = QC_MARKETS;
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -268,6 +253,96 @@ const server = http.createServer(async (req, res) => {
         pageErrors: pageErrors.slice(0, 10),
         screenshotBase64,
       });
+    } catch (error) {
+      return sendJson(res, 500, {
+        ok: false,
+        market,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      if (browser) await browser.close();
+    }
+  }
+
+  if (url.pathname === "/qc") {
+    let browser;
+
+    const market = (url.searchParams.get("market") ?? "ARG").toUpperCase();
+    const config = MARKETS[market];
+    const searchTitle = url.searchParams.get("title");
+    const seasonRaw = url.searchParams.get("season");
+    const episodeRaw = url.searchParams.get("episode");
+
+    const seasonNumber = seasonRaw !== null ? Number(seasonRaw) : null;
+    const episodeNumber = episodeRaw !== null ? Number(episodeRaw) : null;
+
+    if (!config) {
+      return sendJson(res, 400, {
+        ok: false,
+        error: `Mercado inválido: ${market}. Usá ARG, MX o BR.`,
+      });
+    }
+
+    if (!searchTitle) {
+      return sendJson(res, 400, {
+        ok: false,
+        error: "Falta el parámetro ?title=",
+      });
+    }
+
+    const isSeriesRequest = seasonRaw !== null || episodeRaw !== null;
+
+    if (
+      isSeriesRequest &&
+      (!Number.isInteger(seasonNumber) ||
+        !Number.isInteger(episodeNumber) ||
+        seasonNumber < 1 ||
+        episodeNumber < 1)
+    ) {
+      return sendJson(res, 400, {
+        ok: false,
+        error: "?season= y ?episode= deben ser números válidos (>=1).",
+      });
+    }
+
+    try {
+      const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
+
+      if (!fs.existsSync(secretPath)) {
+        throw new Error(
+          `Secret file no encontrado: ${secretPath}. ` +
+          `Subí "${config.secretFile}" en Render → Environment → Secret Files.`
+        );
+      }
+
+      const storageState = JSON.parse(fs.readFileSync(secretPath, "utf8"));
+
+      browser = await chromium.launch({
+        headless: true,
+        args: ["--disable-dev-shm-usage"],
+      });
+
+      const context = await browser.newContext({
+        storageState,
+        locale: config.locale,
+        viewport: { width: 1440, height: 900 },
+      });
+
+      const page = await context.newPage();
+
+      const result = await runQc({
+        page,
+        context,
+        market,
+        marketConfig: config,
+        searchTitle,
+        seasonNumber: isSeriesRequest ? seasonNumber : null,
+        episodeNumber: isSeriesRequest ? episodeNumber : null,
+      });
+
+      await context.close();
+
+      return sendJson(res, 200, { ok: true, ...result });
     } catch (error) {
       return sendJson(res, 500, {
         ok: false,
