@@ -107,51 +107,76 @@ async function readTitleTreatment(imageUrl) {
     throw new Error("GROQ_API_KEY no configurada");
   }
 
-  const response = await fetch(
-    "https://api.groq.com/openai/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "qwen/qwen3.8-27b",
-        temperature: 0,
-        max_completion_tokens: 100,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text:
-                  "Transcribe únicamente el texto visible " +
-                  "del logo o title treatment de esta imagen. " +
-                  "No describas la imagen. " +
-                  "No agregues explicaciones. " +
-                  "Si no podés leerlo con confianza, responde UNKNOWN.",
-              },
-              {
-                type: "image_url",
-                image_url: { url: imageUrl },
-              },
-            ],
-          },
-        ],
-      }),
+  // Groq devuelve 429 (rate limit) o 503 ("currently over capacity")
+  // cuando el modelo de vision está saturado — es transitorio, así
+  // que reintentamos con backoff en vez de rendirnos al primer golpe
+  // (esto era lo que hacía aparecer "UNKNOWN"/"no disponible" en
+  // logos perfectamente legibles).
+  const maxAttempts = 3;
+  const retryDelaysMs = [1500, 3000];
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "qwen/qwen3.8-27b",
+          temperature: 0,
+          max_completion_tokens: 100,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "Transcribe únicamente el texto visible " +
+                    "del logo o title treatment de esta imagen. " +
+                    "No describas la imagen. " +
+                    "No agregues explicaciones. " +
+                    "Si no podés leerlo con confianza, responde UNKNOWN.",
+                },
+                {
+                  type: "image_url",
+                  image_url: { url: imageUrl },
+                },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+
+    const body = await response.text();
+
+    if (
+      (response.status === 429 || response.status === 503) &&
+      attempt < maxAttempts
+    ) {
+      lastError = new Error(`Groq Vision HTTP ${response.status}: ${body}`);
+      await new Promise((resolve) =>
+        setTimeout(resolve, retryDelaysMs[attempt - 1])
+      );
+      continue;
     }
-  );
 
-  const body = await response.text();
+    if (!response.ok) {
+      throw new Error(`Groq Vision HTTP ${response.status}: ${body}`);
+    }
 
-  if (!response.ok) {
-    throw new Error(`Groq Vision HTTP ${response.status}: ${body}`);
+    const json = JSON.parse(body);
+
+    return json.choices?.[0]?.message?.content?.trim() ?? "UNKNOWN";
   }
 
-  const json = JSON.parse(body);
-
-  return json.choices?.[0]?.message?.content?.trim() ?? "UNKNOWN";
+  throw lastError ?? new Error("Groq Vision: no se pudo completar la solicitud.");
 }
 
 function attr(line, name) {
@@ -531,9 +556,12 @@ export async function runQc({
   }
 
   if (titleTreatmentImageId) {
+    // jpeg + una resolución más alta que la original (800x300): el
+    // recorte chico/comprimido en webp era una lectura más difícil
+    // para el modelo de vision que el logo real (nítido) en Disney+.
     const titleTreatmentUrl =
       "https://disney.images.edge.bamgrid.com/ripcut-delivery/v2/variant/disney/" +
-      `${titleTreatmentImageId}/trim?format=webp&max=800%7C300`;
+      `${titleTreatmentImageId}/trim?format=jpeg&max=1200%7C450`;
 
     try {
       const titleTreatmentResponse =
