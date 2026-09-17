@@ -317,8 +317,22 @@ export async function runQc({
 
       const headers = await request.allHeaders();
 
-      if (headers.authorization) {
-        disneyApiHeaders = { authorization: headers.authorization };
+      if (!headers.authorization) return;
+
+      // El Playback API rechaza el request (400) si faltan estos
+      // headers adicionales que la SPA manda junto con el
+      // authorization — no alcanza con el bearer solo.
+      disneyApiHeaders = { authorization: headers.authorization };
+
+      for (const name of [
+        "x-bamsdk-client-id",
+        "x-bamsdk-platform",
+        "x-bamsdk-version",
+        "x-application-version",
+      ]) {
+        if (headers[name]) {
+          disneyApiHeaders[name] = headers[name];
+        }
       }
     })().catch((error) => {
       console.error("request listener error:", error);
