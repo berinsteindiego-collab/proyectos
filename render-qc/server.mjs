@@ -1,25 +1,33 @@
 import http from "node:http";
+import fs from "node:fs";
 import { chromium } from "playwright";
 
 const port = Number(process.env.PORT || 10000);
+
+// Las sesiones se leen de Render "Secret Files" (no de env vars: el
+// storageState de Disney+ es demasiado grande para pasar como
+// variable de entorno y rompe el build con "argument list too long").
+// Cada secret file se sube en Render con este mismo nombre y queda
+// disponible en runtime en /etc/secrets/<filename>.
+const SECRETS_DIR = "/etc/secrets";
 
 const MARKETS = {
   ARG: {
     locale: "es-419",
     webPath: "es-419",
-    envVar: "DISNEY_ARG_STORAGE_STATE",
+    secretFile: "disney-arg-storage-state.json",
   },
 
   MX: {
     locale: "es-419",
     webPath: "es-419",
-    envVar: "DISNEY_MX_STORAGE_STATE",
+    secretFile: "disney-mx-storage-state.json",
   },
 
   BR: {
     locale: "pt-BR",
     webPath: "pt-br",
-    envVar: "DISNEY_BR_STORAGE_STATE",
+    secretFile: "disney-br-storage-state.json",
   },
 };
 
@@ -81,16 +89,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      const encodedState = process.env[config.envVar];
+      const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
 
-      if (!encodedState) {
+      if (!fs.existsSync(secretPath)) {
         throw new Error(
-          `${config.envVar} no encontrada`
+          `Secret file no encontrado: ${secretPath}. ` +
+          `Subí "${config.secretFile}" en Render → Environment → Secret Files.`
         );
       }
 
       const storageState = JSON.parse(
-        Buffer.from(encodedState, "base64").toString("utf8")
+        fs.readFileSync(secretPath, "utf8")
       );
 
       browser = await chromium.launch({
@@ -174,17 +183,6 @@ const server = http.createServer(async (req, res) => {
       if (browser) await browser.close();
     }
   }
-
-  return sendJson(res, 404, {
-    ok: false,
-    error: "Not found",
-    pathname: url.pathname,
-  });
-});
-
-server.listen(port, "0.0.0.0", () => {
-  console.log(`QC server listening on port ${port}`);
-});
 
   return sendJson(res, 404, {
     ok: false,
