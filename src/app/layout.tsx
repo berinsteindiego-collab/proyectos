@@ -60,6 +60,13 @@ export default function RootLayout({
               >
                 Proyectos
               </a>
+
+              <a
+                href="/conviva"
+                className="rounded-md px-3 py-1.5 font-medium text-slate-700 transition hover:bg-white hover:text-indigo-600 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+              >
+                Pulse Conviva
+              </a>
             </nav>
 
             <ThemeToggle />

@@ -5,12 +5,15 @@ import { NextRequest, NextResponse } from "next/server";
 // from being wide open to anyone who finds it, since the PMO base itself
 // stays read-only and the Airtable PAT never leaves the server.
 const COOKIE_NAME = "pc_auth";
-// /api/live y /api/mcp quedan públicos: los llaman, respectivamente, el
-// fetch() del navegador y el conector MCP del Artifact de Claude, ninguno
-// de los dos con la cookie pc_auth. Ambos solo devuelven conteos agregados
-// de audiencia (no PII), así que dejarlos sin gate es una decisión
-// aceptada, no un descuido.
-const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/live", "/api/mcp"]);
+// /api/live, /api/mcp y /conviva quedan públicos. Los dos primeros porque
+// los llama código que nunca tiene la cookie pc_auth (el fetch() del
+// Artifact y, cuando el admin de la organización habilite conectores
+// personalizados, el conector MCP). /conviva es la página real de Pulse
+// Conviva: la dejamos sin gate a propósito, mismo criterio que /api/live —
+// solo muestra conteos agregados de audiencia (no PII) — para que
+// cualquiera en Disney entre directo con el link, sin pedir la clave del
+// sitio primero.
+const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/live", "/api/mcp", "/conviva"]);
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
