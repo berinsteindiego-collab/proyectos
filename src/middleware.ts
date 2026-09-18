@@ -5,7 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 // from being wide open to anyone who finds it, since the PMO base itself
 // stays read-only and the Airtable PAT never leaves the server.
 const COOKIE_NAME = "pc_auth";
-const PUBLIC_PATHS = new Set(["/login", "/api/login"]);
+// /api/live queda público: lo llama el Artifact de Claude desde otro origen
+// (claude.ai), que nunca va a tener la cookie pc_auth. Solo devuelve
+// conteos agregados de audiencia (no PII), así que dejarlo sin gate es
+// una decisión aceptada, no un descuido.
+const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/live"]);
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
