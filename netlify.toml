@@ -2,5 +2,9 @@
   command = "npm run build"
   publish = ".next"
 
+  # mcp-handler (usado por /api/mcp) requiere Node 20+.
+  [build.environment]
+    NODE_VERSION = "20"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
