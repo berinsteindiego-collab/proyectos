@@ -17,12 +17,22 @@ export async function renewSession(market, config) {
     context = await browser.newContext({ locale: config.locale, viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
     let authorized = false;
+    const navigation = [];
+    const failedRequests = [];
+    page.on("response", response => {
+      if (!response.request().isNavigationRequest()) return;
+      try { const u = new URL(response.url()); navigation.push({ host: u.hostname, path: u.pathname, status: response.status() }); } catch {}
+    });
+    page.on("requestfailed", request => {
+      try { const u = new URL(request.url()); failedRequests.push({ host: u.hostname, kind: request.resourceType(), error: request.failure()?.errorText?.slice(0, 70) || "failed" }); } catch {}
+    });
     page.on("response", response => {
       if (response.url().startsWith("https://disney.api.edge.bamgrid.com/explore/") && response.status() >= 200 && response.status() < 300) authorized = true;
     });
     stage = "open_login";
     // Enter via the supported home route: direct /login may render an empty SPA shell.
     await page.goto(disneyUrl(config.webPath, "home"), { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(3500);
     const landingLogin = page.getByRole("link", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i }).or(page.getByRole("button", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i })).first();
     if (await landingLogin.isVisible().catch(() => false)) await landingLogin.click({ timeout: 8000 });
     stage = "find_email";
@@ -61,12 +71,14 @@ export async function renewSession(market, config) {
           autocomplete: node.getAttribute("autocomplete") || "",
         })).slice(0, 10)).catch(() => []);
         const frameCount = page.frames().length;
-        const frameInputs = await Promise.all(page.frames().map(async frame => ({ host: (() => { try { return new URL(frame.url()).hostname; } catch { return "unknown"; } })(), inputs: await frame.locator("input").count().catch(() => 0) })));
+        const frameInputs = await Promise.all(page.frames().map(async frame => ({ location: (() => { try { const u = new URL(frame.url()); return { host: u.hostname, path: u.pathname }; } catch { return { host: "unknown", path: "" }; } })(), inputs: await frame.locator("input").count().catch(() => 0), textLength: await frame.locator("body").evaluate(el => (el.innerText || "").length).catch(() => 0) })));
         console.error("QC renewal frame diagnostic:", JSON.stringify(frameInputs));
+        console.error("QC renewal navigation diagnostic:", JSON.stringify(navigation.slice(-12)));
+        console.error("QC renewal failed requests:", JSON.stringify(failedRequests.slice(-12)));
         const bodyLength = await page.locator("body").evaluate(node => (node.innerText || "").length).catch(() => 0);
         const titleLength = (await page.title().catch(() => "")).length;
         console.error("QC renewal login diagnostic:", JSON.stringify({ path: safePath, inputs: fields, frameCount, bodyLength, titleLength }));
-        return { ok: false, stage: "find_email", message: `Disney+ no mostró el campo de correo. Pantalla: ${safePath}. Campos: ${fields.map(field => field.type).join(", ") || "ninguno"}. Texto: ${bodyLength} caracteres; frames: ${frameCount}.` };
+        return { ok: false, stage: "find_email", message: `Disney+ no mostró el formulario. Pantalla: ${safePath}. Texto: ${bodyLength} caracteres; frames: ${frameCount}. Revisá en Render las líneas QC renewal navigation diagnostic, frame diagnostic y failed requests (sin compartir datos de sesión).` };
       }
     }
     stage = "fill_email";
