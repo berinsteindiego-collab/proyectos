@@ -36,64 +36,46 @@ export async function renewSession(market, config) {
     const landingLogin = page.getByRole("link", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i }).or(page.getByRole("button", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i })).first();
     if (await landingLogin.isVisible().catch(() => false)) await landingLogin.click({ timeout: 8000 });
     stage = "find_email";
+    // Disney's identity UI is embedded in a cross-origin login.disney.com iframe.
+    // Locate the actual visible field there, not in the empty Disney+ SPA shell
+    // or in the reCAPTCHA iframe.
     const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="username"], input[name="loginValue"], input[type="text"]';
-    let loginFrame = page.frames().find(frame => { try { return new URL(frame.url()).hostname === "login.disney.com"; } catch { return false; } }) || page.mainFrame();
-    let email = loginFrame.locator(emailSelector).first();
-    for (let attempt = 0; attempt < 12; attempt++) {
-      for (const frame of [...page.frames()].sort((a, b) => Number(b.url().includes("login.disney.com")) - Number(a.url().includes("login.disney.com")))) {
-        if (await frame.locator(emailSelector).first().isVisible().catch(() => false)) {
+    let loginFrame;
+    let email;
+    for (let attempt = 0; attempt < 35; attempt++) {
+      for (const frame of page.frames()) {
+        if (!frame.url().startsWith("https://login.disney.com/")) continue;
+        const candidate = frame.locator(emailSelector).filter({ visible: true }).first();
+        if (await candidate.count().catch(() => 0)) {
           loginFrame = frame;
-          email = frame.locator(emailSelector).first();
+          email = candidate;
           break;
         }
       }
-      if (await email.isVisible().catch(() => false)) break;
-      await page.waitForTimeout(750);
+      if (email) break;
+      await page.waitForTimeout(500);
     }
-    try {
-      await email.waitFor({ state: "visible", timeout: 12000 });
-    } catch {
-      // Login may start at /home and require an explicit Sign in click.
-      const signIn = page.getByRole("link", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i }).or(
-        page.getByRole("button", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i })
-      ).first();
-      if (await signIn.isVisible().catch(() => false)) {
-        stage = "open_login_from_landing";
-        await signIn.click({ timeout: 8000 });
-        stage = "find_email";
-        await email.waitFor({ state: "visible", timeout: 12000 });
-      } else {
-        const location = new URL(page.url());
-        const safePath = location.origin === "https://www.disneyplus.com" ? location.pathname : location.hostname + location.pathname;
-        const fields = await page.locator("input").evaluateAll(nodes => nodes.map(node => ({
-          type: node.getAttribute("type") || "text",
+    if (!email) {
+      const frames = await Promise.all(page.frames().map(async frame => {
+        let host = "unknown";
+        try { host = new URL(frame.url()).hostname; } catch {}
+        if (host !== "login.disney.com") return { host, fields: 0 };
+        const fields = await frame.locator("input").evaluateAll(nodes => nodes.map(node => ({
+          type: node.getAttribute("type") || "",
           name: node.getAttribute("name") || "",
           autocomplete: node.getAttribute("autocomplete") || "",
-        })).slice(0, 10)).catch(() => []);
-        const frameCount = page.frames().length;
-        const frameInputs = await Promise.all(page.frames().map(async frame => ({ location: (() => { try { const u = new URL(frame.url()); return { host: u.hostname, path: u.pathname }; } catch { return { host: "unknown", path: "" }; } })(), inputs: await frame.locator("input").count().catch(() => 0), textLength: await frame.locator("body").evaluate(el => (el.innerText || "").length).catch(() => 0) })));
-        console.error("QC renewal frame diagnostic:", JSON.stringify(frameInputs));
-        console.error("QC renewal navigation diagnostic:", JSON.stringify(navigation.slice(-12)));
-        console.error("QC renewal failed requests:", JSON.stringify(failedRequests.slice(-12)));
-        const bodyLength = await page.locator("body").evaluate(node => (node.innerText || "").length).catch(() => 0);
-        const titleLength = (await page.title().catch(() => "")).length;
-        console.error("QC renewal login diagnostic:", JSON.stringify({ path: safePath, inputs: fields, frameCount, bodyLength, titleLength }));
-        return { ok: false, stage: "find_email", message: `Disney+ no mostró el formulario. Pantalla: ${safePath}. Texto: ${bodyLength} caracteres; frames: ${frameCount}. Revisá en Render las líneas QC renewal navigation diagnostic, frame diagnostic y failed requests (sin compartir datos de sesión).` };
-      }
-    }
-    // Re-resolve the field after iframe navigation; never reuse a stale frame locator.
-    for (const frame of page.frames()) {
-      if (await frame.locator(emailSelector).first().isVisible().catch(() => false)) {
-        loginFrame = frame;
-        email = frame.locator(emailSelector).first();
-        break;
-      }
+          visible: Boolean(node.getClientRects().length),
+        })).slice(0, 8)).catch(() => []);
+        return { host, fields };
+      }));
+      console.error("QC renewal identity frame fields:", JSON.stringify(frames));
+      return { ok: false, stage: "find_email", message: "No se encontró el campo de correo dentro del iframe de Disney. Revisá QC renewal identity frame fields en Render." };
     }
     stage = "fill_email";
     await email.fill(EMAILS[market]);
-    const passwordInput = loginFrame.locator('input[type="password"]').first();
+    let passwordInput = loginFrame.locator('input[type="password"]').first();
     if (!(await passwordInput.isVisible().catch(() => false))) {
-      const next = loginFrame.getByRole("button", { name: /continuar|continue|siguiente|next|entrar|log in|iniciar sesión/i }).first();
+      const next = loginFrame.getByRole("button", { name: /continuar|continue|siguiente|next|entrar|log in|iniciar sesión|seguir/i }).or(loginFrame.locator('button[type="submit"], input[type="submit"]')).first();
       stage = "continue_to_password";
       await next.click({ timeout: 10000 });
     }
