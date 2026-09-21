@@ -24,6 +24,22 @@ export default function QcSessionsPage() {
   const [loading, setLoading] = useState<Market | null>(null);
   const [errors, setErrors] = useState<Partial<Record<Market, string>>>({});
   const [testingBrowser, setTestingBrowser] = useState(false);
+  const [renewing, setRenewing] = useState<Market | null>(null);
+  const [renewMessages, setRenewMessages] = useState<Partial<Record<Market, string>>>({});
+
+  async function renew(market: Market) {
+    if (loading || testingBrowser || renewing) return;
+    setRenewing(market);
+    setRenewMessages(old => ({ ...old, [market]: "Intentando iniciar sesión en Disney+ desde Render..." }));
+    try {
+      const response = await fetch("/api/qc/renew", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ market }) });
+      const data = await response.json() as { ok: boolean; message?: string };
+      setRenewMessages(old => ({ ...old, [market]: data.message || (data.ok ? "Sesión guardada. Comprobá la sesión." : "No se pudo renovar.") }));
+      if (data.ok) setResults(old => { const next = { ...old }; delete next[market]; return next; });
+    } catch {
+      setRenewMessages(old => ({ ...old, [market]: "No se pudo completar la solicitud. Comprobá la sesión antes de reintentar." }));
+    } finally { setRenewing(null); }
+  }
   const [browserResult, setBrowserResult] = useState<string | null>(null);
 
   function renderBase() {
@@ -33,7 +49,7 @@ export default function QcSessionsPage() {
   }
 
   async function testBrowser() {
-    if (testingBrowser || loading) return;
+    if (testingBrowser || loading || renewing) return;
     setTestingBrowser(true);
     setBrowserResult(null);
     try {
@@ -49,7 +65,7 @@ export default function QcSessionsPage() {
   }
 
   async function check(market: Market) {
-    if (loading || testingBrowser) return;
+    if (loading || testingBrowser || renewing) return;
     setLoading(market);
     setErrors((old) => ({ ...old, [market]: "" }));
     try {
@@ -93,7 +109,7 @@ export default function QcSessionsPage() {
         <button
           type="button"
           onClick={testBrowser}
-          disabled={testingBrowser || loading !== null}
+          disabled={testingBrowser || loading !== null || renewing !== null}
           className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {testingBrowser ? "Probando Chromium..." : "Probar navegador de Render"}
@@ -121,11 +137,18 @@ export default function QcSessionsPage() {
                 <button
                   type="button"
                   onClick={() => check(code)}
-                  disabled={loading !== null || testingBrowser}
+                  disabled={loading !== null || testingBrowser || renewing !== null}
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                 >
                   {loading === code ? "Comprobando..." : "Comprobar sesión"}
                 </button>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button type="button" onClick={() => renew(code)} disabled={loading !== null || testingBrowser || renewing !== null}
+                  className="rounded-lg border border-indigo-600 px-4 py-2 text-sm font-medium text-indigo-700 disabled:opacity-50 dark:text-indigo-300">
+                  {renewing === code ? "Renovando..." : "Renovar sesión"}
+                </button>
+                {renewMessages[code] && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">{renewMessages[code]}</p>}
               </div>
               {errors[code] && <p role="alert" className="mt-3 text-sm text-red-600">{errors[code]}</p>}
             </section>
