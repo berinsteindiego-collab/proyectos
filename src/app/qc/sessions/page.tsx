@@ -33,8 +33,13 @@ export default function QcSessionsPage() {
     setRenewMessages(old => ({ ...old, [market]: "Intentando iniciar sesión en Disney+ desde Render..." }));
     try {
       const response = await fetch("/api/qc/renew", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ market }) });
-      const data = await response.json() as { ok: boolean; message?: string };
-      setRenewMessages(old => ({ ...old, [market]: data.message || (data.ok ? "Sesión guardada. Comprobá la sesión." : "No se pudo renovar.") }));
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        setRenewMessages(old => ({ ...old, [market]: `Project Control devolvió HTTP ${response.status} sin JSON. Posible timeout de Netlify; comprobá la sesión antes de reintentar.` }));
+        return;
+      }
+      const data = await response.json() as { ok: boolean; message?: string; stage?: string };
+      setRenewMessages(old => ({ ...old, [market]: `${data.stage ? `[${data.stage}] ` : ""}${data.message || (data.ok ? "Sesión guardada. Comprobá la sesión." : `Renovación fallida (HTTP ${response.status}).`)}` }));
       if (data.ok) setResults(old => { const next = { ...old }; delete next[market]; return next; });
     } catch {
       setRenewMessages(old => ({ ...old, [market]: "No se pudo completar la solicitud. Comprobá la sesión antes de reintentar." }));
