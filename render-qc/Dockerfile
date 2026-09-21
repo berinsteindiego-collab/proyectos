@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY server.mjs qc-logic.mjs ./
+COPY server.mjs qc-logic.mjs session-store.mjs ./
 
 ENV NODE_ENV=production
 ENV PORT=10000
