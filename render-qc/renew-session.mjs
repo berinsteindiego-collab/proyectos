@@ -24,7 +24,30 @@ export async function renewSession(market, config) {
     await page.goto(disneyUrl(config.webPath, "login"), { waitUntil: "domcontentloaded", timeout: 30000 });
     stage = "find_email";
     const email = page.locator('input[type="email"], input[name="email"], input[autocomplete="username"]').first();
-    await email.waitFor({ state: "visible", timeout: 25000 });
+    try {
+      await email.waitFor({ state: "visible", timeout: 12000 });
+    } catch {
+      // Login may start at /home and require an explicit Sign in click.
+      const signIn = page.getByRole("link", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i }).or(
+        page.getByRole("button", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i })
+      ).first();
+      if (await signIn.isVisible().catch(() => false)) {
+        stage = "open_login_from_landing";
+        await signIn.click({ timeout: 8000 });
+        stage = "find_email";
+        await email.waitFor({ state: "visible", timeout: 12000 });
+      } else {
+        const location = new URL(page.url());
+        const safePath = location.origin === "https://www.disneyplus.com" ? location.pathname : location.hostname + location.pathname;
+        const fields = await page.locator("input").evaluateAll(nodes => nodes.map(node => ({
+          type: node.getAttribute("type") || "text",
+          name: node.getAttribute("name") || "",
+          autocomplete: node.getAttribute("autocomplete") || "",
+        })).slice(0, 10)).catch(() => []);
+        console.error("QC renewal login diagnostic:", JSON.stringify({ path: safePath, inputs: fields }));
+        return { ok: false, stage: "find_email", message: `Disney+ no mostró el campo de correo. Pantalla: ${safePath}. Campos: ${fields.map(field => field.type).join(", ") || "ninguno"}.` };
+      }
+    }
     stage = "fill_email";
     await email.fill(EMAILS[market]);
     const passwordInput = page.locator('input[type="password"]').first();
@@ -57,7 +80,7 @@ export async function renewSession(market, config) {
   } catch (error) {
     const kind = error instanceof Error ? error.name : "unknown";
     console.error("QC renewal failed at stage:", stage, "error type:", kind);
-    const labels = { launch: "iniciar Chromium", context: "preparar el navegador", open_login: "abrir Disney+", find_email: "encontrar el campo de correo", fill_email: "completar el correo", continue_to_password: "avanzar a la contraseña", find_password: "encontrar el campo de contraseña", submit_password: "enviar el login", verify_login: "confirmar el login", capture_session: "capturar la sesión", save_session: "guardar la sesión" };
+    const labels = { launch: "iniciar Chromium", context: "preparar el navegador", open_login: "abrir Disney+", open_login_from_landing: "abrir el login desde Disney+", find_email: "encontrar el campo de correo", fill_email: "completar el correo", continue_to_password: "avanzar a la contraseña", find_password: "encontrar el campo de contraseña", submit_password: "enviar el login", verify_login: "confirmar el login", capture_session: "capturar la sesión", save_session: "guardar la sesión" };
     return { ok: false, stage, message: `Falló al ${labels[stage] || "renovar la sesión"} (${kind}). No se guardó una sesión nueva.` };
   } finally {
     if (context) await context.close().catch(() => {});
