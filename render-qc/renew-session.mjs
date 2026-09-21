@@ -36,11 +36,11 @@ export async function renewSession(market, config) {
     const landingLogin = page.getByRole("link", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i }).or(page.getByRole("button", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i })).first();
     if (await landingLogin.isVisible().catch(() => false)) await landingLogin.click({ timeout: 8000 });
     stage = "find_email";
-    const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="username"]';
-    let loginFrame = page.mainFrame();
+    const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="username"], input[name="loginValue"], input[type="text"]';
+    let loginFrame = page.frames().find(frame => { try { return new URL(frame.url()).hostname === "login.disney.com"; } catch { return false; } }) || page.mainFrame();
     let email = loginFrame.locator(emailSelector).first();
     for (let attempt = 0; attempt < 12; attempt++) {
-      for (const frame of page.frames()) {
+      for (const frame of [...page.frames()].sort((a, b) => Number(b.url().includes("login.disney.com")) - Number(a.url().includes("login.disney.com")))) {
         if (await frame.locator(emailSelector).first().isVisible().catch(() => false)) {
           loginFrame = frame;
           email = frame.locator(emailSelector).first();
@@ -48,7 +48,7 @@ export async function renewSession(market, config) {
         }
       }
       if (await email.isVisible().catch(() => false)) break;
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(750);
     }
     try {
       await email.waitFor({ state: "visible", timeout: 12000 });
@@ -79,6 +79,14 @@ export async function renewSession(market, config) {
         const titleLength = (await page.title().catch(() => "")).length;
         console.error("QC renewal login diagnostic:", JSON.stringify({ path: safePath, inputs: fields, frameCount, bodyLength, titleLength }));
         return { ok: false, stage: "find_email", message: `Disney+ no mostró el formulario. Pantalla: ${safePath}. Texto: ${bodyLength} caracteres; frames: ${frameCount}. Revisá en Render las líneas QC renewal navigation diagnostic, frame diagnostic y failed requests (sin compartir datos de sesión).` };
+      }
+    }
+    // Re-resolve the field after iframe navigation; never reuse a stale frame locator.
+    for (const frame of page.frames()) {
+      if (await frame.locator(emailSelector).first().isVisible().catch(() => false)) {
+        loginFrame = frame;
+        email = frame.locator(emailSelector).first();
+        break;
       }
     }
     stage = "fill_email";
