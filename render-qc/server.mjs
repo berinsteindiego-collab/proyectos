@@ -1,5 +1,5 @@
 import http from "node:http";
-import fs from "node:fs";
+import { loadSession } from "./session-store.mjs";
 import { chromium } from "playwright";
 import { MARKETS as QC_MARKETS, runQc, disneyUrl } from "./qc-logic.mjs";
 
@@ -23,7 +23,7 @@ process.on("uncaughtException", (error) => {
 // variable de entorno y rompe el build con "argument list too long").
 // Cada secret file se sube en Render con este mismo nombre y queda
 // disponible en runtime en /etc/secrets/<filename>.
-const SECRETS_DIR = "/etc/secrets";
+
 
 // Una sola fuente de verdad para los 3 mercados (locale, webPath,
 // nombre del secret file, y qcRegion/label que usa la lógica de QC).
@@ -108,11 +108,8 @@ const server = http.createServer(async (req, res) => {
     let browser;
     let context;
     try {
-      const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
-      if (!fs.existsSync(secretPath)) {
-        return sendJson(res, 200, { ok: true, market, status: "unverified", reason: "missing_session" });
-      }
-      const storageState = JSON.parse(fs.readFileSync(secretPath, "utf8"));
+      const storageState = await loadSession(market, config.secretFile);
+      if (!storageState) return sendJson(res, 200, { ok: true, market, status: "unverified", reason: "missing_session" });
       browser = await chromium.launch({
         headless: true,
         args: ["--disable-dev-shm-usage"],
@@ -196,18 +193,8 @@ const server = http.createServer(async (req, res) => {
     qcBusy = true;
 
     try {
-      const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
-
-      if (!fs.existsSync(secretPath)) {
-        throw new Error(
-          `Secret file no encontrado: ${secretPath}. ` +
-          `Subí "${config.secretFile}" en Render → Environment → Secret Files.`
-        );
-      }
-
-      const storageState = JSON.parse(
-        fs.readFileSync(secretPath, "utf8")
-      );
+      const storageState = await loadSession(market, config.secretFile);
+      if (!storageState) throw new Error("No hay sesión configurada para este mercado.");
 
       browser = await chromium.launch({
         headless: true,
@@ -428,16 +415,8 @@ const server = http.createServer(async (req, res) => {
     qcBusy = true;
 
     try {
-      const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
-
-      if (!fs.existsSync(secretPath)) {
-        throw new Error(
-          `Secret file no encontrado: ${secretPath}. ` +
-          `Subí "${config.secretFile}" en Render → Environment → Secret Files.`
-        );
-      }
-
-      const storageState = JSON.parse(fs.readFileSync(secretPath, "utf8"));
+      const storageState = await loadSession(market, config.secretFile);
+      if (!storageState) throw new Error("No hay sesión configurada para este mercado.");
 
       browser = await chromium.launch({
         headless: true,
