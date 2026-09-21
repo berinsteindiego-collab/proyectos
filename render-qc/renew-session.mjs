@@ -21,7 +21,10 @@ export async function renewSession(market, config) {
       if (response.url().startsWith("https://disney.api.edge.bamgrid.com/explore/") && response.status() >= 200 && response.status() < 300) authorized = true;
     });
     stage = "open_login";
-    await page.goto(disneyUrl(config.webPath, "login"), { waitUntil: "domcontentloaded", timeout: 30000 });
+    // Enter via the supported home route: direct /login may render an empty SPA shell.
+    await page.goto(disneyUrl(config.webPath, "home"), { waitUntil: "domcontentloaded", timeout: 30000 });
+    const landingLogin = page.getByRole("link", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i }).or(page.getByRole("button", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i })).first();
+    if (await landingLogin.isVisible().catch(() => false)) await landingLogin.click({ timeout: 8000 });
     stage = "find_email";
     const email = page.locator('input[type="email"], input[name="email"], input[autocomplete="username"]').first();
     try {
@@ -44,8 +47,11 @@ export async function renewSession(market, config) {
           name: node.getAttribute("name") || "",
           autocomplete: node.getAttribute("autocomplete") || "",
         })).slice(0, 10)).catch(() => []);
-        console.error("QC renewal login diagnostic:", JSON.stringify({ path: safePath, inputs: fields }));
-        return { ok: false, stage: "find_email", message: `Disney+ no mostró el campo de correo. Pantalla: ${safePath}. Campos: ${fields.map(field => field.type).join(", ") || "ninguno"}.` };
+        const frameCount = page.frames().length;
+        const bodyLength = await page.locator("body").evaluate(node => (node.innerText || "").length).catch(() => 0);
+        const titleLength = (await page.title().catch(() => "")).length;
+        console.error("QC renewal login diagnostic:", JSON.stringify({ path: safePath, inputs: fields, frameCount, bodyLength, titleLength }));
+        return { ok: false, stage: "find_email", message: `Disney+ no mostró el campo de correo. Pantalla: ${safePath}. Campos: ${fields.map(field => field.type).join(", ") || "ninguno"}. Texto: ${bodyLength} caracteres; frames: ${frameCount}.` };
       }
     }
     stage = "fill_email";
