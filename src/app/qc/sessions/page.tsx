@@ -5,10 +5,11 @@ import { useState } from "react";
 type Market = "ARG" | "MX" | "BR";
 type SessionStatus = "connected" | "login_required" | "service_error" | "unverified" | "busy";
 type SessionResult = { ok: boolean; market: Market; status: SessionStatus; checkedAt?: string; reason?: string };
-const MARKETS: { code: Market; name: string }[] = [
-  { code: "ARG", name: "Argentina" },
-  { code: "MX", name: "México" },
-  { code: "BR", name: "Brasil" },
+type BrowserTest = { ok: boolean; message?: string; chromiumVersion?: string; error?: string };
+const MARKETS: { code: Market; name: string; email: string }[] = [
+  { code: "ARG", name: "Argentina", email: "testqc-arg@disneytesting.com" },
+  { code: "MX", name: "México", email: "testqc-mx@disneytesting.com" },
+  { code: "BR", name: "Brasil", email: "testqc-br@disneytesting.com" },
 ];
 const LABELS: Record<SessionStatus, string> = {
   connected: "Conectada",
@@ -22,16 +23,38 @@ export default function QcSessionsPage() {
   const [results, setResults] = useState<Partial<Record<Market, SessionResult>>>({});
   const [loading, setLoading] = useState<Market | null>(null);
   const [errors, setErrors] = useState<Partial<Record<Market, string>>>({});
+  const [testingBrowser, setTestingBrowser] = useState(false);
+  const [browserResult, setBrowserResult] = useState<string | null>(null);
+
+  function renderBase() {
+    const base = process.env.NEXT_PUBLIC_QC_RENDER_URL;
+    if (!base) throw new Error("Falta NEXT_PUBLIC_QC_RENDER_URL.");
+    return base.replace(/\/$/, "");
+  }
+
+  async function testBrowser() {
+    if (testingBrowser || loading) return;
+    setTestingBrowser(true);
+    setBrowserResult(null);
+    try {
+      const response = await fetch(`${renderBase()}/browser-test`, { cache: "no-store" });
+      const data = (await response.json()) as BrowserTest;
+      if (!response.ok || !data.ok) throw new Error(data.error || "No se pudo iniciar Chromium.");
+      setBrowserResult(`OK: Chromium ${data.chromiumVersion ?? ""} inició en Render y se cerró correctamente.`);
+    } catch (error) {
+      setBrowserResult(`Falló la prueba: ${error instanceof Error ? error.message : "No se pudo contactar Render."}`);
+    } finally {
+      setTestingBrowser(false);
+    }
+  }
 
   async function check(market: Market) {
-    if (loading) return;
+    if (loading || testingBrowser) return;
     setLoading(market);
     setErrors((old) => ({ ...old, [market]: "" }));
     try {
-      const base = process.env.NEXT_PUBLIC_QC_RENDER_URL;
-      if (!base) throw new Error("Falta NEXT_PUBLIC_QC_RENDER_URL.");
       const response = await fetch(
-        `${base.replace(/\/$/, "")}/session-status?market=${market}`,
+        `${renderBase()}/session-status?market=${market}`,
         { cache: "no-store" }
       );
       const data = (await response.json()) as SessionResult;
@@ -58,18 +81,34 @@ export default function QcSessionsPage() {
           Disney+ QC · Session Manager
         </h1>
         <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-          Comprobá las sesiones de test utilizadas por Render. Los estados se verifican
-          bajo demanda; no representan una comprobación continua.
+          Cuentas de prueba preconfiguradas. Comprobá la sesión de cada mercado o probá
+          que Chromium puede iniciarse en Render.
         </p>
       </div>
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+        <h2 className="font-semibold text-slate-900 dark:text-slate-100">Prueba técnica · navegador de Render</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Abre y cierra Chromium en el servidor. No inicia sesión ni modifica ninguna cuenta.
+        </p>
+        <button
+          type="button"
+          onClick={testBrowser}
+          disabled={testingBrowser || loading !== null}
+          className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {testingBrowser ? "Probando Chromium..." : "Probar navegador de Render"}
+        </button>
+        {browserResult && <p role="status" className="mt-3 text-sm text-slate-700 dark:text-slate-200">{browserResult}</p>}
+      </section>
       <div className="grid gap-4">
-        {MARKETS.map(({ code, name }) => {
+        {MARKETS.map(({ code, name, email }) => {
           const result = results[code];
           return (
             <section key={code} className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-semibold text-slate-900 dark:text-slate-100">{name} · {code}</h2>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{email}</p>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                     Estado: {result ? LABELS[result.status] : "Aún no comprobada"}
                   </p>
@@ -82,7 +121,7 @@ export default function QcSessionsPage() {
                 <button
                   type="button"
                   onClick={() => check(code)}
-                  disabled={loading !== null}
+                  disabled={loading !== null || testingBrowser}
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                 >
                   {loading === code ? "Comprobando..." : "Comprobar sesión"}
@@ -94,8 +133,8 @@ export default function QcSessionsPage() {
         })}
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Renovación remota y consulta de contraseñas pendientes de integración segura.
-        Este módulo no modifica las sesiones existentes.
+        La prueba del navegador no renueva sesiones. La renovación remota y la consulta
+        de contraseñas todavía no están implementadas.
       </p>
     </main>
   );
