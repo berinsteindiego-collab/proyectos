@@ -68,8 +68,30 @@ export async function renewSession(market, config) {
         })).slice(0, 8)).catch(() => []);
         return { host, fields };
       }));
-      console.error("QC renewal identity frame fields:", JSON.stringify(frames));
-      return { ok: false, stage: "find_email", message: "No se encontró el campo de correo dentro del iframe de Disney. Revisá QC renewal identity frame fields en Render." };
+      // Only record response status and safe page structure, never page text,
+      // cookies, hidden values, URLs with query strings, or credentials.
+      const identityFrames = page.frames().filter(frame => {
+        try { return new URL(frame.url()).hostname === "login.disney.com"; } catch { return false; }
+      });
+      const identityDiagnostics = await Promise.all(identityFrames.map(async frame => {
+        const title = await frame.title().catch(() => "");
+        const structure = await frame.locator("body").evaluate(node => ({
+          childElements: node.children.length,
+          visibleTextLength: node.innerText.length,
+          scriptCount: document.scripts.length,
+        })).catch(() => ({ childElements: 0, visibleTextLength: 0, scriptCount: 0 }));
+        return { titleLength: title.length, ...structure };
+      }));
+      const recentIdentityNavigation = navigation.filter(item => item.host === "login.disney.com").slice(-5);
+      const recentIdentityFailures = failedRequests.filter(item => item.host === "login.disney.com").slice(-5);
+      console.error("QC renewal identity diagnostics:", JSON.stringify({
+        frames, identityDiagnostics, recentIdentityNavigation, recentIdentityFailures,
+      }));
+      return {
+        ok: false,
+        stage: "identity_not_rendered",
+        message: "Disney+ abrió el iframe de identidad pero no renderizó el formulario de acceso. El bot no puede ingresar la contraseña ni renovar la sesión en este estado. Revisá QC renewal identity diagnostics en Render.",
+      };
     }
     stage = "fill_email";
     await email.fill(EMAILS[market]);
