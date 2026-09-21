@@ -96,6 +96,77 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // Read-only session check. No secrets, tokens, URLs or screenshots in output.
+  // Shares the same single-Chromium lock as QC on Render free tier.
+  if (url.pathname === "/session-status") {
+    const market = (url.searchParams.get("market") ?? "").toUpperCase();
+    const config = MARKETS[market];
+    if (!config) return sendJson(res, 400, { ok: false, error: "Mercado inválido." });
+    if (qcBusy) return sendJson(res, 429, { ok: false, market, status: "busy" });
+
+    qcBusy = true;
+    let browser;
+    let context;
+    try {
+      const secretPath = `${SECRETS_DIR}/${config.secretFile}`;
+      if (!fs.existsSync(secretPath)) {
+        return sendJson(res, 200, { ok: true, market, status: "unverified", reason: "missing_session" });
+      }
+      const storageState = JSON.parse(fs.readFileSync(secretPath, "utf8"));
+      browser = await chromium.launch({
+        headless: true,
+        args: ["--disable-dev-shm-usage"],
+      });
+      context = await browser.newContext({
+        storageState,
+        locale: config.locale,
+        viewport: { width: 1440, height: 900 },
+      });
+      const page = await context.newPage();
+      let authorizedExplore = false;
+      let rejectedExplore = false;
+      page.on("response", (response) => {
+        const requestUrl = response.url();
+        if (!requestUrl.startsWith("https://disney.api.edge.bamgrid.com/explore/")) return;
+        if (response.status() >= 200 && response.status() < 300) authorizedExplore = true;
+        if (response.status() === 401 || response.status() === 403) rejectedExplore = true;
+      });
+      await page.goto(disneyUrl(config.webPath, "home"), {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+      const deadline = Date.now() + 20000;
+      while (!authorizedExplore && !rejectedExplore && Date.now() < deadline) {
+        await page.waitForTimeout(500);
+      }
+      const loginRedirect = /\\/(login|identity|welcome)(?:\\/|$|\\?)/i.test(
+        new URL(page.url()).pathname
+      );
+      const status = authorizedExplore
+        ? "connected"
+        : loginRedirect || rejectedExplore
+          ? "login_required"
+          : "unverified";
+      return sendJson(res, 200, {
+        ok: true,
+        market,
+        status,
+        checkedAt: new Date().toISOString(),
+      });
+    } catch {
+      return sendJson(res, 200, {
+        ok: true,
+        market,
+        status: "service_error",
+        checkedAt: new Date().toISOString(),
+      });
+    } finally {
+      if (context) await context.close().catch(() => {});
+      if (browser) await browser.close().catch(() => {});
+      qcBusy = false;
+    }
+  }
+
   if (url.pathname === "/qc-test") {
     let browser;
 
