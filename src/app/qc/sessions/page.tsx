@@ -40,9 +40,22 @@ export default function QcSessionsPage() {
       }
       const data = await response.json() as { ok: boolean; message?: string; stage?: string };
       setRenewMessages(old => ({ ...old, [market]: `${data.stage ? `[${data.stage}] ` : ""}${data.message || (data.ok ? "Sesión guardada. Comprobá la sesión." : `Renovación fallida (HTTP ${response.status}).`)}` }));
-      if (data.ok) setResults(old => { const next = { ...old }; delete next[market]; return next; });
-    } catch {
-      setRenewMessages(old => ({ ...old, [market]: "No se pudo completar la solicitud. Comprobá la sesión antes de reintentar." }));
+      if (data.ok && (data as { stage?: string }).stage === "running") {
+        for (let attempt = 0; attempt < 45; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const poll = await fetch(`/api/qc/renew?market=${market}`, { cache: "no-store" });
+          const state = await poll.json() as { ok: boolean; stage?: string; message?: string };
+          if (!poll.ok) throw new Error(state.message || "No se pudo consultar la renovación.");
+          if (state.stage !== "running") {
+            setRenewMessages(old => ({ ...old, [market]: state.message || (state.ok ? "Sesión guardada." : "Falló la renovación.") }));
+            if (state.ok) setResults(old => { const next = { ...old }; delete next[market]; return next; });
+            return;
+          }
+        }
+        setRenewMessages(old => ({ ...old, [market]: "La renovación tarda más de lo esperado. Comprobá la sesión antes de reintentar." }));
+      }
+    } catch (error) {
+      setRenewMessages(old => ({ ...old, [market]: error instanceof Error ? error.message : "No se pudo completar la solicitud. Comprobá la sesión antes de reintentar." }));
     } finally { setRenewing(null); }
   }
   const [browserResult, setBrowserResult] = useState<string | null>(null);
