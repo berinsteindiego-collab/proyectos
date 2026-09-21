@@ -139,7 +139,7 @@ const server = http.createServer(async (req, res) => {
       while (!authorizedExplore && !rejectedExplore && Date.now() < deadline) {
         await page.waitForTimeout(500);
       }
-      const loginRedirect = /\\/(login|identity|welcome)(?:\\/|$|\\?)/i.test(
+      const loginRedirect = /\/(login|identity|welcome)(?:\/|$)/i.test(
         new URL(page.url()).pathname
       );
       const status = authorizedExplore
