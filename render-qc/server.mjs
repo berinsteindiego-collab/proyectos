@@ -39,6 +39,7 @@ const MARKETS = QC_MARKETS;
 // devolvemos 429 inmediatamente para las demás, para que quede claro
 // que hay que esperar en vez de fallar en silencio.
 let qcBusy = false;
+const renewalJobs = new Map();
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -67,22 +68,34 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  // Protected write endpoint. Never expose this operation to public browser CORS.
-  if (url.pathname === "/renew-session" && req.method === "POST") {
+  // Renewal is a background job: Netlify must not wait for Chromium/Disney+.
+  if (url.pathname === "/renew-session" || url.pathname === "/renew-status") {
     const token = process.env.QC_RENEW_TOKEN;
     if (!token || req.headers.authorization !== `Bearer ${token}`) {
       return sendJson(res, 403, { ok: false, message: "No autorizado." });
     }
     const market = (url.searchParams.get("market") ?? "").toUpperCase();
     if (!MARKETS[market]) return sendJson(res, 400, { ok: false, message: "Mercado inválido." });
+    if (url.pathname === "/renew-status" && req.method === "GET") {
+      const job = renewalJobs.get(market);
+      return sendJson(res, 200, job || { ok: false, stage: "not_started", message: "No hay renovación en curso." });
+    }
+    if (url.pathname !== "/renew-session" || req.method !== "POST") {
+      return sendJson(res, 405, { ok: false, message: "Método no permitido." });
+    }
     if (qcBusy) return sendJson(res, 429, { ok: false, message: "QC en curso. Reintentá después." });
     qcBusy = true;
-    try {
-      const result = await renewSession(market, MARKETS[market]);
-      return sendJson(res, result.ok ? 200 : 422, result);
-    } finally {
-      qcBusy = false;
-    }
+    const job = { ok: true, stage: "running", market, startedAt: new Date().toISOString(), message: "Render está intentando el login automático." };
+    renewalJobs.set(market, job);
+    // Intentionally not awaited: respond immediately, retain Chromium lock until completion.
+    void renewSession(market, MARKETS[market])
+      .then(result => renewalJobs.set(market, { ...result, market, finishedAt: new Date().toISOString() }))
+      .catch(error => {
+        console.error("QC renewal job error:", error instanceof Error ? error.name : "unknown");
+        renewalJobs.set(market, { ok: false, stage: "error", market, message: "Error interno de renovación." });
+      })
+      .finally(() => { qcBusy = false; });
+    return sendJson(res, 202, job);
   }
 
   if (url.pathname === "/health") {
