@@ -1,6 +1,7 @@
 import http from "node:http";
 import { loadSession } from "./session-store.mjs";
 import { chromium } from "playwright";
+import { renewSession } from "./renew-session.mjs";
 import { MARKETS as QC_MARKETS, runQc, disneyUrl } from "./qc-logic.mjs";
 
 const port = Number(process.env.PORT || 10000);
@@ -64,6 +65,24 @@ const server = http.createServer(async (req, res) => {
     });
 
     return res.end();
+  }
+
+  // Protected write endpoint. Never expose this operation to public browser CORS.
+  if (url.pathname === "/renew-session" && req.method === "POST") {
+    const token = process.env.QC_RENEW_TOKEN;
+    if (!token || req.headers.authorization !== `Bearer ${token}`) {
+      return sendJson(res, 403, { ok: false, message: "No autorizado." });
+    }
+    const market = (url.searchParams.get("market") ?? "").toUpperCase();
+    if (!MARKETS[market]) return sendJson(res, 400, { ok: false, message: "Mercado inválido." });
+    if (qcBusy) return sendJson(res, 429, { ok: false, message: "QC en curso. Reintentá después." });
+    qcBusy = true;
+    try {
+      const result = await renewSession(market, MARKETS[market]);
+      return sendJson(res, result.ok ? 200 : 422, result);
+    } finally {
+      qcBusy = false;
+    }
   }
 
   if (url.pathname === "/health") {
