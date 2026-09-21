@@ -31,7 +31,7 @@ export default function QcSessionsPage() {
       const base = process.env.NEXT_PUBLIC_QC_RENDER_URL;
       if (!base) throw new Error("Falta NEXT_PUBLIC_QC_RENDER_URL.");
       const response = await fetch(
-        `${base.replace(/\\/$/, "")}/session-status?market=${market}`,
+        `${base.replace(/\/$/, "")}/session-status?market=${market}`,
         { cache: "no-store" }
       );
       const data = (await response.json()) as SessionResult;
