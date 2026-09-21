@@ -26,7 +26,20 @@ export async function renewSession(market, config) {
     const landingLogin = page.getByRole("link", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i }).or(page.getByRole("button", { name: /log in|sign in|iniciar sesi[oó]n|entrar|acessar|acceso/i })).first();
     if (await landingLogin.isVisible().catch(() => false)) await landingLogin.click({ timeout: 8000 });
     stage = "find_email";
-    const email = page.locator('input[type="email"], input[name="email"], input[autocomplete="username"]').first();
+    const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="username"]';
+    let loginFrame = page.mainFrame();
+    let email = loginFrame.locator(emailSelector).first();
+    for (let attempt = 0; attempt < 12; attempt++) {
+      for (const frame of page.frames()) {
+        if (await frame.locator(emailSelector).first().isVisible().catch(() => false)) {
+          loginFrame = frame;
+          email = frame.locator(emailSelector).first();
+          break;
+        }
+      }
+      if (await email.isVisible().catch(() => false)) break;
+      await page.waitForTimeout(500);
+    }
     try {
       await email.waitFor({ state: "visible", timeout: 12000 });
     } catch {
@@ -48,6 +61,8 @@ export async function renewSession(market, config) {
           autocomplete: node.getAttribute("autocomplete") || "",
         })).slice(0, 10)).catch(() => []);
         const frameCount = page.frames().length;
+        const frameInputs = await Promise.all(page.frames().map(async frame => ({ host: (() => { try { return new URL(frame.url()).hostname; } catch { return "unknown"; } })(), inputs: await frame.locator("input").count().catch(() => 0) })));
+        console.error("QC renewal frame diagnostic:", JSON.stringify(frameInputs));
         const bodyLength = await page.locator("body").evaluate(node => (node.innerText || "").length).catch(() => 0);
         const titleLength = (await page.title().catch(() => "")).length;
         console.error("QC renewal login diagnostic:", JSON.stringify({ path: safePath, inputs: fields, frameCount, bodyLength, titleLength }));
@@ -56,9 +71,9 @@ export async function renewSession(market, config) {
     }
     stage = "fill_email";
     await email.fill(EMAILS[market]);
-    const passwordInput = page.locator('input[type="password"]').first();
+    const passwordInput = loginFrame.locator('input[type="password"]').first();
     if (!(await passwordInput.isVisible().catch(() => false))) {
-      const next = page.getByRole("button", { name: /continuar|continue|siguiente|next|entrar|log in|iniciar sesión/i }).first();
+      const next = loginFrame.getByRole("button", { name: /continuar|continue|siguiente|next|entrar|log in|iniciar sesión/i }).first();
       stage = "continue_to_password";
       await next.click({ timeout: 10000 });
     }
