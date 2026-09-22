@@ -18,16 +18,26 @@ export async function renewSession(market, config) {
     browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage"] });
     stage = "context";
     context = await browser.newContext({ locale: config.locale, viewport: { width: 1440, height: 900 } });
-    // Avoid media/visual assets while loading Disney identity; preserve scripts, XHR and frames.
-    await context.route(/\\.(?:png|jpe?g|webp|gif|svg|woff2?|ttf|otf|mp4|m4v|webm)(?:[?#]|$)/i, route => route.abort().catch(() => {}));
     const page = await context.newPage();
     let authorized = false;
     const navigation = [];
     const failedRequests = [];
+    const identityAssets = [];
+    const identityErrors = [];
     page.on("response", response => {
+      try {
+        const u = new URL(response.url());
+        if (u.hostname === "login.disney.com" && !response.request().isNavigationRequest() && identityAssets.length < 20) {
+          identityAssets.push({ kind: response.request().resourceType(), status: response.status(), path: u.pathname.slice(0, 100) });
+        }
+      } catch {}
       if (!response.request().isNavigationRequest()) return;
       try { const u = new URL(response.url()); if (navigation.length < 12) navigation.push({ host: u.hostname, path: u.pathname, status: response.status() }); } catch {}
     });
+    page.on("console", message => {
+      if (message.type() === "error" && identityErrors.length < 8) identityErrors.push({ kind: "console_error" });
+    });
+    page.on("pageerror", () => { if (identityErrors.length < 8) identityErrors.push({ kind: "page_error" }); });
     page.on("requestfailed", request => {
       try { const u = new URL(request.url()); if (failedRequests.length < 12) failedRequests.push({ host: u.hostname, kind: request.resourceType(), error: request.failure()?.errorText?.slice(0, 70) || "failed" }); } catch {}
     });
@@ -95,6 +105,7 @@ export async function renewSession(market, config) {
       const recentIdentityFailures = failedRequests.filter(item => item.host === "login.disney.com").slice(-5);
       console.error("QC renewal identity diagnostics:", JSON.stringify({
         frames, identityDiagnostics, recentIdentityNavigation, recentIdentityFailures,
+        identityAssets, identityErrors,
       }));
       return {
         ok: false,
