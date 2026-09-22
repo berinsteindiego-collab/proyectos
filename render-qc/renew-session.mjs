@@ -11,20 +11,25 @@ export async function renewSession(market, config) {
   let browser;
   let context;
   let stage = "launch";
+  // Render Free has 512 MB shared by Node and Chromium. Stop before OOM.
+  const memoryMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+  if (memoryMb > 350) return { ok: false, stage: "memory", message: "Render tiene memoria insuficiente para iniciar otra renovación. Esperá a que se estabilice el servicio." };
   try {
     browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage"] });
     stage = "context";
     context = await browser.newContext({ locale: config.locale, viewport: { width: 1440, height: 900 } });
+    // Avoid media/visual assets while loading Disney identity; preserve scripts, XHR and frames.
+    await context.route(/\\.(?:png|jpe?g|webp|gif|svg|woff2?|ttf|otf|mp4|m4v|webm)(?:[?#]|$)/i, route => route.abort().catch(() => {}));
     const page = await context.newPage();
     let authorized = false;
     const navigation = [];
     const failedRequests = [];
     page.on("response", response => {
       if (!response.request().isNavigationRequest()) return;
-      try { const u = new URL(response.url()); navigation.push({ host: u.hostname, path: u.pathname, status: response.status() }); } catch {}
+      try { const u = new URL(response.url()); if (navigation.length < 12) navigation.push({ host: u.hostname, path: u.pathname, status: response.status() }); } catch {}
     });
     page.on("requestfailed", request => {
-      try { const u = new URL(request.url()); failedRequests.push({ host: u.hostname, kind: request.resourceType(), error: request.failure()?.errorText?.slice(0, 70) || "failed" }); } catch {}
+      try { const u = new URL(request.url()); if (failedRequests.length < 12) failedRequests.push({ host: u.hostname, kind: request.resourceType(), error: request.failure()?.errorText?.slice(0, 70) || "failed" }); } catch {}
     });
     page.on("response", response => {
       if (response.url().startsWith("https://disney.api.edge.bamgrid.com/explore/") && response.status() >= 200 && response.status() < 300) authorized = true;
@@ -42,7 +47,7 @@ export async function renewSession(market, config) {
     const emailSelector = 'input#email, input[name="email"], input[type="email"], input[autocomplete="username"], input[name="loginValue"]';
     let loginFrame;
     let email;
-    for (let attempt = 0; attempt < 35; attempt++) {
+    for (let attempt = 0; attempt < 16; attempt++) {
       for (const frame of page.frames()) {
         // Disney identity may be hosted on a different Disney-owned origin or nested frame.
         // Never type credentials into a third-party frame.
