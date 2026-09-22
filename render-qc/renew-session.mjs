@@ -60,8 +60,24 @@ export async function renewSession(market, config) {
     const emailSelector = 'input#email, input[name="email"], input[type="email"], input[autocomplete="username"], input[name="loginValue"]';
     let loginFrame;
     let email;
-    for (let attempt = 0; attempt < 24; attempt++) {
-      if (attempt === 12) {
+    let triedTopLevelIdentity = false;
+    for (let attempt = 0; attempt < 28; attempt++) {
+      if (attempt === 10 && !triedTopLevelIdentity) {
+        // Identity is sometimes blank only when embedded as a third-party iframe.
+        // Open its exact Disney-owned URL as the top-level document instead.
+        // Preserve its original query/transaction state, but never log the URL.
+        const identity = page.frames().find(frame => {
+          try { return new URL(frame.url()).hostname === "login.disney.com"; } catch { return false; }
+        });
+        if (identity) {
+          const identityUrl = identity.url();
+          triedTopLevelIdentity = true;
+          stage = "open_identity_top_level";
+          await page.goto(identityUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+          stage = "find_email";
+        }
+      }
+      if (attempt === 18) {
         stage = "retry_identity";
         await page.goto(disneyUrl(config.webPath, "login"), { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
         stage = "find_email";
@@ -113,12 +129,12 @@ export async function renewSession(market, config) {
       const recentIdentityFailures = failedRequests.filter(item => item.host === "login.disney.com").slice(-5);
       console.error("QC renewal identity diagnostics:", JSON.stringify({
         frames, identityDiagnostics, recentIdentityNavigation, recentIdentityFailures,
-        identityAssets, identityErrors,
+        identityAssets, identityErrors, triedTopLevelIdentity,
       }));
       return {
         ok: false,
         stage: "identity_not_rendered",
-        message: "Disney+ no cargó el formulario de acceso en Chromium, incluso tras reintentar el login. No se ingresó la contraseña ni se guardó una sesión. La renovación automática no puede completarse mientras Disney+ muestre esa pantalla vacía.",
+        message: "Disney+ no cargó el formulario, ni siquiera al abrir el acceso de Disney en una pestaña principal. No se ingresó la contraseña ni se guardó una sesión.",
       };
     }
     stage = "choose_password_login";
@@ -158,7 +174,7 @@ export async function renewSession(market, config) {
   } catch (error) {
     const kind = error instanceof Error ? error.name : "unknown";
     console.error("QC renewal failed at stage:", stage, "error type:", kind);
-    const labels = { launch: "iniciar Chromium", context: "preparar el navegador", open_login: "abrir Disney+", retry_identity: "reintentar el login", open_login_from_landing: "abrir el login desde Disney+", find_email: "encontrar el campo de correo", choose_password_login: "elegir el acceso con contraseña", fill_email: "completar el correo", continue_to_password: "avanzar a la contraseña", find_password: "encontrar el campo de contraseña", submit_password: "enviar el login", verify_login: "confirmar el login", capture_session: "capturar la sesión", save_session: "guardar la sesión" };
+    const labels = { launch: "iniciar Chromium", context: "preparar el navegador", open_login: "abrir Disney+", open_identity_top_level: "abrir la página de acceso de Disney directamente", retry_identity: "reintentar el login", open_login_from_landing: "abrir el login desde Disney+", find_email: "encontrar el campo de correo", choose_password_login: "elegir el acceso con contraseña", fill_email: "completar el correo", continue_to_password: "avanzar a la contraseña", find_password: "encontrar el campo de contraseña", submit_password: "enviar el login", verify_login: "confirmar el login", capture_session: "capturar la sesión", save_session: "guardar la sesión" };
     return { ok: false, stage, message: `Falló al ${labels[stage] || "renovar la sesión"} (${kind}). No se guardó una sesión nueva.` };
   } finally {
     if (context) await context.close().catch(() => {});
