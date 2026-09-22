@@ -39,12 +39,16 @@ export async function renewSession(market, config) {
     // Disney's identity UI is embedded in a cross-origin login.disney.com iframe.
     // Locate the actual visible field there, not in the empty Disney+ SPA shell
     // or in the reCAPTCHA iframe.
-    const emailSelector = 'input[type="email"], input[name="email"], input[autocomplete="username"], input[name="loginValue"], input[type="text"]';
+    const emailSelector = 'input#email, input[name="email"], input[type="email"], input[autocomplete="username"], input[name="loginValue"]';
     let loginFrame;
     let email;
     for (let attempt = 0; attempt < 35; attempt++) {
       for (const frame of page.frames()) {
-        if (!frame.url().startsWith("https://login.disney.com/")) continue;
+        // Disney identity may be hosted on a different Disney-owned origin or nested frame.
+        // Never type credentials into a third-party frame.
+        let host;
+        try { host = new URL(frame.url()).hostname; } catch { continue; }
+        if (!(host === "disneyplus.com" || host.endsWith(".disneyplus.com") || host === "disney.com" || host.endsWith(".disney.com"))) continue;
         const candidate = frame.locator(emailSelector).filter({ visible: true }).first();
         if (await candidate.count().catch(() => 0)) {
           loginFrame = frame;
@@ -93,9 +97,14 @@ export async function renewSession(market, config) {
         message: "Disney+ abrió el iframe de identidad pero no renderizó el formulario de acceso. El bot no puede ingresar la contraseña ni renovar la sesión en este estado. Revisá QC renewal identity diagnostics en Render.",
       };
     }
+    stage = "choose_password_login";
+    const passwordInstead = loginFrame.getByText(/enter password instead|usar contraseña|ingresar contraseña|utilizar senha|entrar com senha/i).first();
+    if (await passwordInstead.isVisible().catch(() => false)) {
+      await passwordInstead.click({ timeout: 10000 });
+    }
     stage = "fill_email";
     await email.fill(EMAILS[market]);
-    let passwordInput = loginFrame.locator('input[type="password"]').first();
+    let passwordInput = loginFrame.locator('input#password, input[name="password"], input[type="password"]').first();
     if (!(await passwordInput.isVisible().catch(() => false))) {
       const next = loginFrame.getByRole("button", { name: /continuar|continue|siguiente|next|entrar|log in|iniciar sesión|seguir/i }).or(loginFrame.locator('button[type="submit"], input[type="submit"]')).first();
       stage = "continue_to_password";
@@ -125,7 +134,7 @@ export async function renewSession(market, config) {
   } catch (error) {
     const kind = error instanceof Error ? error.name : "unknown";
     console.error("QC renewal failed at stage:", stage, "error type:", kind);
-    const labels = { launch: "iniciar Chromium", context: "preparar el navegador", open_login: "abrir Disney+", open_login_from_landing: "abrir el login desde Disney+", find_email: "encontrar el campo de correo", fill_email: "completar el correo", continue_to_password: "avanzar a la contraseña", find_password: "encontrar el campo de contraseña", submit_password: "enviar el login", verify_login: "confirmar el login", capture_session: "capturar la sesión", save_session: "guardar la sesión" };
+    const labels = { launch: "iniciar Chromium", context: "preparar el navegador", open_login: "abrir Disney+", open_login_from_landing: "abrir el login desde Disney+", find_email: "encontrar el campo de correo", choose_password_login: "elegir el acceso con contraseña", fill_email: "completar el correo", continue_to_password: "avanzar a la contraseña", find_password: "encontrar el campo de contraseña", submit_password: "enviar el login", verify_login: "confirmar el login", capture_session: "capturar la sesión", save_session: "guardar la sesión" };
     return { ok: false, stage, message: `Falló al ${labels[stage] || "renovar la sesión"} (${kind}). No se guardó una sesión nueva.` };
   } finally {
     if (context) await context.close().catch(() => {});
